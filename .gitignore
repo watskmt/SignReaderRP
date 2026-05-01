@@ -81,6 +81,7 @@ mobile/android/local.properties
 mobile/android/captures/
 mobile/android/.externalNativeBuild/
 mobile/android/.cxx/
+mobile/android/app/.cxx/
 mobile/ios/build/
 mobile/ios/Pods/
 mobile/ios/*.xcworkspace
