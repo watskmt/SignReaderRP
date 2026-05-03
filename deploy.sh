@@ -18,6 +18,22 @@ DEPLOY_DIR="${DEPLOY_DIR:-/opt/signreader}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 COMPOSE_FILE="backend/docker-compose.prod.yml"
 
+# SSH キー設定（DEPLOY_SSH_KEY 環境変数から一時ファイルを作成）
+# DEPLOY_SSH_KEY は秘密鍵の内容、またはファイルパスのどちらでも可
+SSH_KEY_FILE=""
+if [[ -n "${DEPLOY_SSH_KEY:-}" ]]; then
+    SSH_KEY_FILE=$(mktemp)
+    chmod 600 "$SSH_KEY_FILE"
+    # ファイルパスの場合は内容を読み込む、そうでなければ直接書き込む
+    if [[ -f "$DEPLOY_SSH_KEY" ]]; then
+        cp "$DEPLOY_SSH_KEY" "$SSH_KEY_FILE"
+        chmod 600 "$SSH_KEY_FILE"
+    else
+        echo "$DEPLOY_SSH_KEY" > "$SSH_KEY_FILE"
+    fi
+    trap 'rm -f "$SSH_KEY_FILE"' EXIT
+fi
+
 # ─────────────────────────────── ヘルパー ─────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -25,11 +41,16 @@ info()    { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
-ssh_cmd() { ssh -p "$SERVER_PORT" "${SERVER_USER}@${SERVER_HOST}" "$@"; }
-scp_file() { scp -P "$SERVER_PORT" "$1" "${SERVER_USER}@${SERVER_HOST}:$2"; }
+SSH_OPTS=""
+if [[ -n "$SSH_KEY_FILE" ]]; then
+    SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no"
+fi
+
+ssh_cmd() { ssh $SSH_OPTS -p "$SERVER_PORT" "${SERVER_USER}@${SERVER_HOST}" "$@"; }
+scp_file() { scp $SSH_OPTS -P "$SERVER_PORT" "$1" "${SERVER_USER}@${SERVER_HOST}:$2"; }
 
 check_config() {
-    [[ -z "$SERVER_HOST" ]] && error "SERVER_HOST が未設定です。例: export SERVER_HOST=192.168.1.100"
+    if [[ -z "$SERVER_HOST" ]]; then error "SERVER_HOST が未設定です。例: export SERVER_HOST=192.168.1.100"; fi
 }
 
 # ─────────────────────────────── setup ────────────────────────────────────────
@@ -75,13 +96,84 @@ cmd_deploy() {
     check_config
 
     # .env.prod の存在確認
-    [[ ! -f "backend/.env.prod" ]] && error ".env.prod が見つかりません。backend/.env.prod.example をコピーして設定してください"
+    if [[ ! -f "backend/.env.prod" ]]; then error ".env.prod が見つかりません。backend/.env.prod.example をコピーして設定してください"; fi
 
     info "デプロイを開始します → ${SERVER_HOST}:${DEPLOY_DIR}"
 
     # 現在のコミットを記録（ロールバック用）
     CURRENT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     info "デプロイするバージョン: ${CURRENT_SHA} (branch: ${GIT_BRANCH})"
+
+    # ─── Docker 未インストール時は自動インストール ──────────────────────────
+
+    info "Docker の状態を確認中..."
+    if ! ssh_cmd "docker --version" 2>/dev/null; then
+        warn "Docker が見つかりません。インストールを開始します..."
+        ssh_cmd bash << 'REMOTE'
+set -euo pipefail
+if ! command -v docker &>/dev/null; then
+    if command -v dnf &>/dev/null; then
+        sudo dnf install -y dnf-utils
+        sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    elif command -v apt-get &>/dev/null; then
+        curl -fsSL https://get.docker.com | sh
+    fi
+    sudo usermod -aG docker "$USER"
+fi
+echo "Docker インストール完了"
+REMOTE
+    fi
+
+    info "Docker デーモンを起動中..."
+    ssh_cmd bash << 'REMOTE'
+set -euo pipefail
+
+# カーネルモジュールの確認
+if ! sudo modprobe nf_tables &>/dev/null; then
+    echo "エラー: カーネルモジュール (nf_tables) が見つかりません。"
+    echo "カーネルの更新後に再起動が必要です。 (sudo reboot)"
+    exit 1
+fi
+
+# iptables の互換性確認（nftables 非対応カーネルの場合は legacy に切り替え）
+switch_to_legacy_iptables() {
+    echo "iptables-nft が動作しません。iptables-legacy に切り替えます..."
+    if ! command -v iptables-legacy &>/dev/null; then
+        if command -v dnf &>/dev/null; then
+            sudo dnf install -y iptables-legacy
+        elif command -v apt-get &>/dev/null; then
+            sudo apt-get install -y iptables
+        fi
+    fi
+    sudo alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
+    sudo alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
+    sudo ln -sf /usr/sbin/iptables-legacy /usr/sbin/iptables 2>/dev/null || true
+    sudo ln -sf /usr/sbin/ip6tables-legacy /usr/sbin/ip6tables 2>/dev/null || true
+}
+
+if command -v iptables &>/dev/null; then
+    if ! sudo iptables -L &>/dev/null; then
+        switch_to_legacy_iptables
+    fi
+fi
+
+if ! docker info &>/dev/null; then
+    sudo systemctl enable docker
+    sudo systemctl start docker || {
+        # 初回起動失敗時は iptables legacy に切り替えて再試行
+        switch_to_legacy_iptables
+        sudo systemctl restart docker || {
+            echo "Docker 起動に失敗しました。手動で systemctl status docker を確認してください"
+            exit 1
+        }
+    }
+    sleep 2
+    echo "Docker デーモン起動完了"
+else
+    echo "Docker デーモンは既に稼働中"
+fi
+REMOTE
 
     # ─── ファイル転送 ───────────────────────────────────────────────────────
 
@@ -96,7 +188,7 @@ cmd_deploy() {
         --exclude='.pytest_cache/' \
         --exclude='htmlcov/' \
         --exclude='*.egg-info/' \
-        -e "ssh -p ${SERVER_PORT}" \
+        -e "ssh $SSH_OPTS -p ${SERVER_PORT}" \
         backend/ \
         "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_DIR}/backend/"
 
@@ -202,7 +294,7 @@ cmd_logs() {
 
 cmd_ssl() {
     check_config
-    [[ -z "${DOMAIN:-}" ]] && error "DOMAIN が未設定です。例: export DOMAIN=api.example.com"
+    if [[ -z "${DOMAIN:-}" ]]; then error "DOMAIN が未設定です。例: export DOMAIN=api.example.com"; fi
 
     info "SSL 証明書を取得します: ${DOMAIN}"
     ssh_cmd bash << REMOTE
@@ -257,6 +349,7 @@ case "$COMMAND" in
         echo "  SERVER_HOST=192.168.1.100  デプロイ先サーバー（必須）"
         echo "  SERVER_USER=ubuntu         SSH ユーザー（デフォルト: ubuntu）"
         echo "  SERVER_PORT=22             SSH ポート（デフォルト: 22）"
+        echo "  DEPLOY_SSH_KEY='...'       SSH 秘密鍵の内容（ファイルパスではない）"
         echo "  DOMAIN=api.example.com     ドメイン名（ssl コマンドで必須）"
         exit 1
         ;;
