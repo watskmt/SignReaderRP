@@ -27,7 +27,7 @@ import { useAppContext } from '../context/AppContext';
 import type { RootStackParamList } from '../App';
 import cameraService from '../services/camera';
 import storageService from '../services/storage';
-import { createSession, processOCRAsync, getTaskStatus, saveExtraction } from '../services/api';
+import { createSession, processOCRAsync, getTaskStatus, getExtractions } from '../services/api';
 
 type CameraScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -126,10 +126,27 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
               extraction_ids?: string[];
               texts_found?: number;
             };
-            setStatusMessage(
-              `Found ${result.texts_found ?? 0} text(s)`,
-            );
+            setStatusMessage(`Found ${result.texts_found ?? 0} text(s)`);
             pendingTasksRef.current.delete(taskId);
+
+            try {
+              const fetched = await getExtractions(sessionId);
+              fetched.forEach((ext) => addExtraction({
+                id: ext.id,
+                session_id: ext.session_id,
+                content: ext.content,
+                confidence: ext.confidence,
+                bounding_box: ext.bounding_box,
+                latitude: ext.latitude,
+                longitude: ext.longitude,
+                altitude: ext.altitude,
+                timestamp: ext.timestamp,
+                engine: ext.engine,
+                is_duplicate: ext.is_duplicate,
+              }));
+            } catch {
+              // extraction fetch failed — data is on server but UI won't update
+            }
           } else if (status.status === 'failure') {
             pendingTasksRef.current.delete(taskId);
           } else if (attempts < maxAttempts) {
@@ -142,7 +159,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
 
       setTimeout(poll, TASK_POLL_INTERVAL_MS);
     },
-    [],
+    [addExtraction],
   );
 
   // ──────────────────────────────── Frame capture ───────────────────────────
@@ -167,7 +184,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
 
         const task = await processOCRAsync(frame, session.id, lat, lon);
         pendingTasksRef.current.add(task.task_id);
-        pollTask(task.task_id, session.id);
+        void pollTask(task.task_id, session.id);
       } catch (err) {
         console.warn('[CameraScreen] Frame processing error:', err);
         setStatusMessage('Upload error — retrying');
@@ -189,7 +206,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
       setStatusMessage('Stopped');
     } else {
       // Start
-      const session = await ensureSession();
+      await ensureSession();
       clearExtractions();
       setRecording(true);
       setStatusMessage('Recording…');
