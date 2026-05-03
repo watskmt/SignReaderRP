@@ -1,16 +1,7 @@
-/**
- * Axios instance for SignReader API communication.
- * Base URL defaults to localhost:8000 for local development.
- * Override API_BASE_URL at build time for staging/production.
- */
 import axios, { AxiosError, AxiosInstance, AxiosResponse } from 'axios';
+import Config from 'react-native-config';
 
-// 実機: Mac と同じ WiFi に接続している場合は Mac のローカルIP を使用
-// Android エミュレーター: 10.0.2.2:8000
-// iOS シミュレーター: localhost:8000
-export const API_BASE_URL =
-  (typeof process !== 'undefined' && process.env?.API_BASE_URL) ||
-  'http://192.168.11.128:8000';
+export const API_BASE_URL = Config.API_BASE_URL ?? 'http://192.168.11.128:8000';
 
 export const API_TIMEOUT_MS = 10_000;
 
