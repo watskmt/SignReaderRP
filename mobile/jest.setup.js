@@ -94,3 +94,13 @@ jest.mock('react-native-permissions', () => ({
   request: jest.fn(() => Promise.resolve('granted')),
   check: jest.fn(() => Promise.resolve('granted')),
 }));
+
+// ─────────────────────────────── react-native-config ─────────────────────────
+jest.mock('react-native-config', () => ({
+  API_BASE_URL: 'http://192.168.11.128:8000',
+}));
+
+// ─────────────────────────────── react-native-share ──────────────────────────
+jest.mock('react-native/Libraries/Share/Share', () => ({
+  share: jest.fn(() => Promise.resolve({ action: 'sharedAction' })),
+}));
