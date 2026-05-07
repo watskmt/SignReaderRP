@@ -129,44 +129,21 @@ REMOTE
     ssh_cmd bash << 'REMOTE'
 set -euo pipefail
 
-# カーネルモジュールの確認
-if ! sudo modprobe nf_tables &>/dev/null; then
-    echo "エラー: カーネルモジュール (nf_tables) が見つかりません。"
-    echo "カーネルの更新後に再起動が必要です。 (sudo reboot)"
-    exit 1
-fi
+# kernel 6.12（EL10系）では nftables ネイティブモードが必要
+sudo mkdir -p /etc/docker
+echo '{"firewall-backend": "nftables"}' | sudo tee /etc/docker/daemon.json > /dev/null
 
-# iptables の互換性確認（nftables 非対応カーネルの場合は legacy に切り替え）
-switch_to_legacy_iptables() {
-    echo "iptables-nft が動作しません。iptables-legacy に切り替えます..."
-    if ! command -v iptables-legacy &>/dev/null; then
-        if command -v dnf &>/dev/null; then
-            sudo dnf install -y iptables-legacy
-        elif command -v apt-get &>/dev/null; then
-            sudo apt-get install -y iptables
-        fi
-    fi
-    sudo alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
-    sudo alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
-    sudo ln -sf /usr/sbin/iptables-legacy /usr/sbin/iptables 2>/dev/null || true
-    sudo ln -sf /usr/sbin/ip6tables-legacy /usr/sbin/ip6tables 2>/dev/null || true
-}
-
-if command -v iptables &>/dev/null; then
-    if ! sudo iptables -L &>/dev/null; then
-        switch_to_legacy_iptables
-    fi
-fi
+sudo modprobe br_netfilter 2>/dev/null || true
+sudo modprobe overlay 2>/dev/null || true
+sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
+echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-docker.conf > /dev/null
 
 if ! docker info &>/dev/null; then
     sudo systemctl enable docker
     sudo systemctl start docker || {
-        # 初回起動失敗時は iptables legacy に切り替えて再試行
-        switch_to_legacy_iptables
-        sudo systemctl restart docker || {
-            echo "Docker 起動に失敗しました。手動で systemctl status docker を確認してください"
-            exit 1
-        }
+        echo "Docker 起動に失敗しました。journalctl -xeu docker.service を確認してください"
+        sudo journalctl -xeu docker.service --no-pager -n 20
+        exit 1
     }
     sleep 2
     echo "Docker デーモン起動完了"
@@ -205,11 +182,17 @@ cd ${DEPLOY_DIR}/backend
 # 直前のイメージタグを保存（ロールバック用）
 docker images signreader-api --format "{{.ID}}" | head -1 > /tmp/signreader_prev_image || true
 
-# イメージをビルド
-docker compose -f docker-compose.prod.yml build --pull --no-cache api worker
+# イメージをビルド（--no-cache は使わない: OOMでsshdが落ちる原因になる）
+docker compose -f docker-compose.prod.yml build api worker
 
-# ゼロダウンタイムでサービスを更新
-docker compose -f docker-compose.prod.yml up -d --remove-orphans
+# ゼロダウンタイムでサービスを更新（nginx は別管理のため --remove-orphans は使わない）
+docker compose -f docker-compose.prod.yml up -d
+
+# nginx を再起動して設定・証明書を最新化
+docker restart signreader-nginx 2>/dev/null || true
+
+# ip_forward はDockerの操作で無効化されることがあるため毎回確認
+sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
 # ヘルスチェック待機（最大60秒）
 echo "API の起動を待機中..."
