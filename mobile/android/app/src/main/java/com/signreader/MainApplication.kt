@@ -9,7 +9,12 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.modules.network.OkHttpClientProvider
 import com.facebook.soloader.SoLoader
+import com.facebook.flipper.android.AndroidFlipperClient
+import com.facebook.flipper.android.utils.FlipperUtils
+import com.facebook.flipper.plugins.network.FlipperOkhttpInterceptor
+import com.facebook.flipper.plugins.network.NetworkFlipperPlugin
 
 class MainApplication : Application(), ReactApplication {
 
@@ -36,8 +41,18 @@ class MainApplication : Application(), ReactApplication {
     super.onCreate()
     SoLoader.init(this, false)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-      // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
+    }
+    if (BuildConfig.DEBUG && FlipperUtils.shouldEnableFlipper(this)) {
+      val networkPlugin = NetworkFlipperPlugin()
+      OkHttpClientProvider.setOkHttpClientFactory {
+        OkHttpClientProvider.createClientBuilder()
+          .addNetworkInterceptor(FlipperOkhttpInterceptor(networkPlugin))
+          .build()
+      }
+      val client = AndroidFlipperClient.getInstance(this)
+      client.addPlugin(networkPlugin)
+      client.start()
     }
   }
 }

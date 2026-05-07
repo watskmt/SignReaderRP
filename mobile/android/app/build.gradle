@@ -51,4 +51,8 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    debugImplementation("com.facebook.flipper:flipper:${FLIPPER_VERSION}")
+    debugImplementation("com.facebook.soloader:soloader:0.10.5")
+    debugImplementation("com.facebook.flipper:flipper-network-plugin:${FLIPPER_VERSION}")
 }
