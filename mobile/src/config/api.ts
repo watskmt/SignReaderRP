@@ -1,9 +1,8 @@
 import axios, { AxiosError, AxiosInstance, AxiosResponse } from 'axios';
-import Config from 'react-native-config';
 
-export const API_BASE_URL = Config.API_BASE_URL ?? 'http://192.168.11.128:8000';
+export const API_BASE_URL = 'https://api.signreader.amtech-service.com';
 
-export const API_TIMEOUT_MS = 10_000;
+export const API_TIMEOUT_MS = 30_000;
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,

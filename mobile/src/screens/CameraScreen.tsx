@@ -20,6 +20,7 @@ import {
   useCameraDevice,
   useCameraPermission,
 } from 'react-native-vision-camera';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 
@@ -48,6 +49,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
   const { hasPermission, requestPermission } = useCameraPermission();
   const captureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingTasksRef = useRef<Set<string>>(new Set());
+  const isUploadingRef = useRef(false);
 
   const {
     currentSession,
@@ -61,6 +63,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
     setGpsEnabled,
   } = useAppContext();
 
+  const isFocused = useIsFocused();
   const [cameraReady, setCameraReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Ready');
 
@@ -166,6 +169,8 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
 
   const handleFrame = useCallback(
     async (frame: string) => {
+      if (isUploadingRef.current) return;
+      isUploadingRef.current = true;
       try {
         const session = await ensureSession();
 
@@ -188,6 +193,8 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
       } catch (err) {
         console.warn('[CameraScreen] Frame processing error:', err);
         setStatusMessage('Upload error — retrying');
+      } finally {
+        isUploadingRef.current = false;
       }
     },
     [ensureSession, gpsEnabled, pollTask],
@@ -244,7 +251,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
         ref={cameraRef}
         style={styles.camera}
         device={device}
-        isActive={true}
+        isActive={isFocused}
         photo={true}
         onInitialized={() => setCameraReady(true)}
       />
