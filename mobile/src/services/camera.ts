@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
 import { check, PERMISSIONS, request, RESULTS } from 'react-native-permissions';
 import { Camera } from 'react-native-vision-camera';
+import RNFS from 'react-native-fs';
 
 export interface GpsCoordinates {
   latitude: number;
@@ -78,37 +79,22 @@ export class CameraService {
       throw new Error('Camera reference is not available');
     }
 
+    // Ensure cache directory exists before Vision Camera writes the photo
+    const cacheDir = RNFS.CachesDirectoryPath;
+    await RNFS.mkdir(cacheDir).catch(() => {});
+
     const photo = await cameraRef.current.takePhoto({
       flash: 'off',
       enableShutterSound: false,
     });
 
-    // We need to read the file and convert to base64.
-    // However, vision-camera returns a path.
-    // If the API expect base64, we might need react-native-fs or similar.
-    // Assuming the user wants a similar behavior to takePictureAsync(base64: true).
-    // For now, let's use a placeholder or check if we have filesystem access.
-    // Wait, let's check if there's any other way in vision-camera v4.
-    // Actually, Vision Camera doesn't return base64 directly in takePhoto.
-    // But since I cannot add new dependencies easily, I should check how it was used.
-    
-    // For simplicity, let's try to fetch the file and convert to base64 if possible,
-    // or just return the path if the API can handle it.
-    // The previous code returned data.base64.
-    
-    // I'll check if I can use fetch() to get base64.
-    const response = await fetch(`file://${photo.path}`);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64data = reader.result as string;
-        // remove "data:image/jpeg;base64,"
-        resolve(base64data.split(',')[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // photo.path may or may not have a file:// prefix — normalise to plain path
+    const filePath = photo.path.replace(/^file:\/\//, '');
+    const base64 = await RNFS.readFile(filePath, 'base64');
+
+    RNFS.unlink(filePath).catch(() => {});
+
+    return base64;
   }
 
   /**

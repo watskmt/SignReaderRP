@@ -3,7 +3,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # PaddleOCR に必要なシステムライブラリ
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libgles2 \
     curl \
+    >/dev/null 2>&1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
