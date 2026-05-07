@@ -43,13 +43,7 @@ DATABASE_URL=postgresql://signreader:signreader_pass@localhost:5432/signreader_d
 
 ## 5. APIサーバーの起動
 
-### Phase 1（同期 OCR、開発・確認用）
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Phase 2（非同期 OCR、推奨）
+### Phase 2（非同期 OCR、推奨・本番使用）
 
 ターミナル 1:
 ```bash
@@ -61,14 +55,17 @@ uvicorn app.main_optimized:app --reload --host 0.0.0.0 --port 8000
 celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
 ```
 
+### Phase 1（同期 OCR、開発・確認用のみ）
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
 ## 6. 動作確認
 
 ```bash
-# ヘルスチェック
 curl http://localhost:8000/health
-
-# Phase 1: {"status":"ok","version":"0.1.0","ocr_engine":"paddleocr"}
-# Phase 2: {"status":"ok","version":"0.2.0","async_processing":true,...}
+# → {"status":"ok","version":"0.2.0","ocr_engine":"paddleocr","async_processing":true}
 ```
 
 Swagger UI: http://localhost:8000/docs
@@ -79,7 +76,7 @@ curl -X POST http://localhost:8000/sessions \
   -H "Content-Type: application/json" \
   -d '{"title": "テスト調査"}'
 
-# 非同期 OCR（Phase 2 のみ）
+# 非同期 OCR
 SESSION_ID="<上記で取得した id>"
 BASE64_IMG=$(base64 < /path/to/image.png)
 curl -X POST http://localhost:8000/ocr/process/async \

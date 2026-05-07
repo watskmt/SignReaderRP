@@ -10,7 +10,7 @@ pip install -r requirements.txt
 # 3. PostgreSQL + Redis を起動
 docker-compose up -d
 
-# 4. 環境変数を設定（パスワードを docker-compose.yml に合わせる）
+# 4. 環境変数を設定
 cp .env.example .env
 # .env: DATABASE_URL=postgresql://signreader:signreader_pass@localhost:5432/signreader_db
 
@@ -29,3 +29,5 @@ curl http://localhost:8000/health
 ```
 
 Swagger UI: http://localhost:8000/docs
+
+**本番 API:** `https://api.signreader.amtech-service.com`

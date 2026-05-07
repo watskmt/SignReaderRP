@@ -21,7 +21,7 @@ SignReader はモバイル端末からビデオフレームを取得し、FastAP
 | モバイルクライアント | React Native 0.75.4、TypeScript |
 | ナビゲーション | React Navigation v6 |
 | カメラ | react-native-vision-camera v4 |
-| HTTP クライアント | Axios |
+| HTTP クライアント | Axios（タイムアウト 30 秒） |
 | バックエンド API | FastAPI 0.104、Python 3.10 |
 | OCR エンジン | PaddleOCR 2.7.3（paddlepaddle 2.6.2 CPU） |
 | タスクキュー | Celery 5.3 + Redis 7 |
@@ -41,7 +41,7 @@ SignReader はモバイル端末からビデオフレームを取得し、FastAP
 | compileSdk / targetSdk | 35 |
 | minSdk | 26 |
 | NDK | 27.1.12297006 |
-| New Architecture | 有効 |
+| New Architecture | 無効（newArchEnabled=false） |
 
 ## ディレクトリ構成
 
@@ -58,11 +58,12 @@ SignReader/
 │
 ├── backend/
 │   ├── .env.example
-│   ├── .env.prod.example
+│   ├── .env.prod                    # 本番環境変数（git管理外）
 │   ├── Dockerfile
 │   ├── docker-compose.yml           # ローカル開発用
-│   ├── docker-compose.prod.yml      # 本番用（nginx なし）
-│   ├── nginx.conf                   # nginx 設定（単独デプロイ用）
+│   ├── docker-compose.prod.yml      # 本番用
+│   ├── nginx-https.conf             # nginx HTTPS 設定（本番）
+│   ├── nginx-certbot.conf           # nginx HTTP 設定（証明書取得用）
 │   ├── requirements.txt
 │   ├── pytest.ini
 │   ├── SETUP.md
@@ -75,7 +76,7 @@ SignReader/
 │   │   ├── models.py
 │   │   ├── schemas.py
 │   │   ├── main.py                  # Phase 1（同期 OCR）
-│   │   ├── main_optimized.py        # Phase 2（Celery + Redis）
+│   │   ├── main_optimized.py        # Phase 2（Celery + Redis）本番使用
 │   │   ├── tasks.py
 │   │   └── services/
 │   │       ├── ocr_service.py
@@ -84,9 +85,9 @@ SignReader/
 │   │
 │   └── tests/
 │       ├── conftest.py
-│       ├── test_api.py              # 17 件
-│       ├── test_ocr_service.py      # 9 件
-│       └── test_services.py         # 16 件
+│       ├── test_api.py
+│       ├── test_ocr_service.py
+│       └── test_services.py
 │
 └── mobile/
     ├── package.json
@@ -96,11 +97,10 @@ SignReader/
     ├── jest.config.js
     ├── jest.setup.js
     ├── PHASE3_GUIDE.md
-    ├── android/                     # Android ネイティブプロジェクト
-    ├── ios/                         # iOS ネイティブプロジェクト
+    ├── android/
     └── src/
         ├── App.tsx
-        ├── config/api.ts
+        ├── config/api.ts            # API_BASE_URL・タイムアウト設定
         ├── context/AppContext.tsx
         ├── services/
         │   ├── api.ts
@@ -111,13 +111,13 @@ SignReader/
         │   ├── SessionListScreen.tsx
         │   └── ResultsScreen.tsx
         └── __tests__/services/
-            ├── api.test.ts          # 8 件
-            └── storage.test.ts      # 13 件
+            ├── api.test.ts
+            └── storage.test.ts
 ```
 
 ## クイックスタート
 
-### バックエンド（Phase 2）
+### バックエンド（ローカル開発）
 
 ```bash
 cd backend
@@ -134,7 +134,6 @@ docker-compose up -d
 
 # 環境変数の設定
 cp .env.example .env
-# .env の DATABASE_URL パスワードを docker-compose.yml に合わせて設定
 
 # Phase 2 API サーバーの起動（非同期 OCR 対応）
 uvicorn app.main_optimized:app --reload --host 0.0.0.0 --port 8000
@@ -149,43 +148,44 @@ Swagger UI: http://localhost:8000/docs
 
 ```bash
 cd mobile
-
 npm install
 
-# Android エミュレーター
-npm run android
+# Metro バンドラー起動
+npx react-native start
 
-# iOS シミュレーター
-cd ios && pod install && cd ..
-npm run ios
+# 別ターミナルで Android デバイスにインストール
+npx react-native run-android
 ```
 
-> **実機からの接続:** `src/config/api.ts` の `API_BASE_URL` を Mac のローカル IP（例: `http://192.168.x.x:8000`）に変更してください。
+> **本番 API への接続:** `src/config/api.ts` の `API_BASE_URL` は `https://api.signreader.amtech-service.com` に設定済みです。
 
 ### テストの実行
 
 ```bash
-# バックエンド（42 件）
+# バックエンド
 cd backend && source venv/bin/activate
 pytest -v
 
-# モバイル（21 件）
+# モバイル
 cd mobile && npm test
 ```
 
 ## デプロイ
 
+本番環境: Rocky Linux（kernel 6.12、EL10系）、`157.120.37.201`
+
 ```bash
-# Rocky Linux VPS の初期セットアップ
-export SERVER_HOST=<VPS_IP>
-export DOMAIN=api.example.com
-sudo bash scripts/rocky-setup.sh
+# 初回セットアップ（Dockerインストール・スワップ・daemon.json設定）
+export SERVER_HOST=157.120.37.201
+export SERVER_USER=rocky
+export DEPLOY_SSH_KEY=~/.ssh/webarena
+./deploy.sh setup
 
 # アプリのデプロイ
-cp backend/.env.prod.example backend/.env.prod
-# .env.prod を編集してパスワード・SECRET_KEY を設定
 ./deploy.sh deploy
 
 # 状態確認
 ./deploy.sh status
 ```
+
+> **注意:** このサーバーは kernel 6.12（EL10系）のため `/etc/docker/daemon.json` に `{"firewall-backend": "nftables"}` が必須です。deploy.sh が自動設定します。
