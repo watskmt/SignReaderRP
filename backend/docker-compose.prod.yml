@@ -10,7 +10,7 @@ services:
       - "127.0.0.1:8000:8000"
     env_file: .env.prod
     volumes:
-      - paddleocr_models:/root/.paddleocr
+      - ./gcp-credentials.json:/app/gcp-credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     env_file: .env.prod
     volumes:
-      - paddleocr_models:/root/.paddleocr
+      - ./gcp-credentials.json:/app/gcp-credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,7 +79,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  paddleocr_models:   # モデルをコンテナ再作成後も保持
 
 networks:
   signreader_net:

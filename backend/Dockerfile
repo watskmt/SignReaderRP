@@ -19,8 +19,17 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# PaddleOCR モデルを事前ダウンロード（ビルド時に取得してコンテナ起動を高速化）
-RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(use_gpu=False, lang='japan', show_log=False)" || true
+# PaddleOCR モデルを事前ダウンロード
+RUN mkdir -p /root/.paddleocr/whl/det/ml /root/.paddleocr/whl/rec/japan /root/.paddleocr/whl/cls && \
+    # 検出モデル
+    curl -fL "https://paddleocr.bj.bcebos.com/PP-OCRv3/multilingual/Multilingual_PP-OCRv3_det_infer.tar" \
+         -o /tmp/det.tar && tar -xf /tmp/det.tar -C /root/.paddleocr/whl/det/ml && rm /tmp/det.tar && \
+    # 認識モデル（日本語）
+    curl -fL "https://paddleocr.bj.bcebos.com/PP-OCRv4/multilingual/japan_PP-OCRv4_rec_infer.tar" \
+         -o /tmp/rec.tar && tar -xf /tmp/rec.tar -C /root/.paddleocr/whl/rec/japan && rm /tmp/rec.tar && \
+    # 方向分類モデル
+    curl -fL "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar" \
+         -o /tmp/cls.tar && tar -xf /tmp/cls.tar -C /root/.paddleocr/whl/cls && rm /tmp/cls.tar
 
 COPY . .
 
