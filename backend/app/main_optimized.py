@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 from celery.result import AsyncResult
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -103,6 +103,15 @@ def health_check() -> dict:
 
 
 # ─────────────────────────────── Sessions ────────────────────────────────────
+
+@app.get("/sessions", response_model=List[SessionResponse])
+def list_sessions(db: Session = Depends(get_db)) -> List[SessionModel]:
+    return (
+        db.query(SessionModel)
+        .order_by(SessionModel.created_at.desc())
+        .all()
+    )
+
 
 @app.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 def create_session(body: SessionCreate, db: Session = Depends(get_db)) -> SessionModel:
@@ -351,3 +360,173 @@ def export_session(session_id: str, db: Session = Depends(get_db)) -> JSONRespon
     }
 
     return JSONResponse(content=payload)
+
+
+# ─────────────────────────────── Admin UI ────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+def admin_ui() -> str:
+    return """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignReader 管理画面</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  body { background: #f8f9fa; }
+  .extraction-row.duplicate { opacity: 0.5; }
+  .confidence-bar { height: 6px; border-radius: 3px; background: #dee2e6; }
+  .confidence-fill { height: 100%; border-radius: 3px; background: #198754; }
+  .session-card { cursor: pointer; transition: box-shadow .15s; }
+  .session-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+  pre { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="container py-4">
+  <div class="d-flex align-items-center mb-4">
+    <h1 class="h3 mb-0 me-3">SignReader 管理画面</h1>
+    <span id="session-count" class="badge bg-secondary">読込中...</span>
+    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSessions()">更新</button>
+  </div>
+
+  <div id="sessions-list" class="row g-3"></div>
+
+  <!-- Extractions Modal -->
+  <div class="modal fade" id="extractionModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modal-title">抽出結果</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="modal-stats" class="row g-2 mb-3"></div>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="hide-duplicates">
+            <label class="form-check-label" for="hide-duplicates">重複を非表示</label>
+          </div>
+          <table class="table table-sm table-hover">
+            <thead class="table-light">
+              <tr>
+                <th>テキスト</th>
+                <th style="width:90px">信頼度</th>
+                <th style="width:60px">重複</th>
+                <th style="width:160px">GPS</th>
+                <th style="width:160px">日時</th>
+              </tr>
+            </thead>
+            <tbody id="extraction-tbody"></tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <a id="export-link" href="#" class="btn btn-outline-primary btn-sm" target="_blank">JSONエクスポート</a>
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const BASE = '';
+let allExtractions = [];
+
+async function loadSessions() {
+  const res = await fetch(BASE + '/sessions');
+  const sessions = await res.json();
+  document.getElementById('session-count').textContent = sessions.length + ' セッション';
+
+  const statsMap = {};
+  await Promise.all(sessions.map(async s => {
+    try {
+      const r = await fetch(BASE + '/sessions/' + s.id + '/stats');
+      statsMap[s.id] = await r.json();
+    } catch {}
+  }));
+
+  const list = document.getElementById('sessions-list');
+  list.innerHTML = sessions.map(s => {
+    const stats = statsMap[s.id] || {};
+    const date = new Date(s.created_at).toLocaleString('ja-JP');
+    const statusColor = s.status === 'active' ? 'success' : 'secondary';
+    return `
+      <div class="col-md-6 col-lg-4">
+        <div class="card session-card h-100" onclick="openSession('${s.id}', '${escHtml(s.title)}')">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h6 class="card-title mb-0">${escHtml(s.title)}</h6>
+              <span class="badge bg-${statusColor}">${s.status}</span>
+            </div>
+            <p class="text-muted small mb-2">${date}</p>
+            <div class="row text-center g-1">
+              <div class="col"><div class="fw-bold">${stats.total_extractions ?? '-'}</div><div class="text-muted" style="font-size:.75rem">抽出</div></div>
+              <div class="col"><div class="fw-bold">${stats.unique_texts ?? '-'}</div><div class="text-muted" style="font-size:.75rem">ユニーク</div></div>
+              <div class="col"><div class="fw-bold">${stats.duplicate_extractions ?? '-'}</div><div class="text-muted" style="font-size:.75rem">重複</div></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function openSession(id, title) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('export-link').href = BASE + '/export/' + id;
+  document.getElementById('extraction-tbody').innerHTML = '<tr><td colspan="5" class="text-center text-muted">読込中...</td></tr>';
+
+  const modal = new bootstrap.Modal(document.getElementById('extractionModal'));
+  modal.show();
+
+  const [extRes, statsRes] = await Promise.all([
+    fetch(BASE + '/extract/' + id),
+    fetch(BASE + '/sessions/' + id + '/stats'),
+  ]);
+  allExtractions = await extRes.json();
+  const stats = await statsRes.json();
+
+  document.getElementById('modal-stats').innerHTML = `
+    <div class="col-auto"><span class="badge bg-primary">${stats.total_extractions} 件</span></div>
+    <div class="col-auto"><span class="badge bg-success">${stats.unique_texts} ユニーク</span></div>
+    <div class="col-auto"><span class="badge bg-secondary">${stats.duplicate_extractions} 重複</span></div>
+    <div class="col-auto"><span class="badge bg-info text-dark">平均信頼度 ${(stats.avg_confidence * 100).toFixed(1)}%</span></div>`;
+
+  renderExtractions();
+}
+
+function renderExtractions() {
+  const hideDup = document.getElementById('hide-duplicates').checked;
+  const rows = allExtractions
+    .filter(e => !hideDup || !e.is_duplicate)
+    .map(e => {
+      const pct = Math.round(e.confidence * 100);
+      const gps = e.latitude ? `${e.latitude.toFixed(5)}, ${e.longitude.toFixed(5)}` : '-';
+      const date = new Date(e.timestamp).toLocaleString('ja-JP');
+      return `<tr class="extraction-row ${e.is_duplicate ? 'duplicate' : ''}">
+        <td>${escHtml(e.content)}</td>
+        <td>
+          <div class="d-flex align-items-center gap-1">
+            <small>${pct}%</small>
+            <div class="confidence-bar flex-grow-1"><div class="confidence-fill" style="width:${pct}%"></div></div>
+          </div>
+        </td>
+        <td>${e.is_duplicate ? '<span class="badge bg-secondary">重複</span>' : ''}</td>
+        <td><small class="text-muted">${gps}</small></td>
+        <td><small class="text-muted">${date}</small></td>
+      </tr>`;
+    }).join('');
+  document.getElementById('extraction-tbody').innerHTML = rows || '<tr><td colspan="5" class="text-center text-muted">データなし</td></tr>';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.getElementById('hide-duplicates').addEventListener('change', renderExtractions);
+
+loadSessions();
+</script>
+</body>
+</html>"""
