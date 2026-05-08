@@ -23,9 +23,10 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
-    # Google Drive
+    # Google Drive (Workload Identity Federation)
+    # GOOGLE_APPLICATION_CREDENTIALS に WIF 認証情報設定ファイルのパスを指定
+    # (秘密鍵ファイルではなく、トークン取得方法を記述した設定ファイル)
     GOOGLE_DRIVE_ENABLED: bool = False
-    GOOGLE_DRIVE_CREDENTIALS_FILE: str = "/app/gcp-credentials.json"
     GOOGLE_DRIVE_FOLDER_ID: str = ""
     GOOGLE_DRIVE_MAX_GB: float = 20.0
 
