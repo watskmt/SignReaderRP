@@ -45,14 +45,16 @@ def _get_services():
     from app.database import SessionLocal
     from app.models import Extraction, Session as SessionModel
     from app.services.cache_service import CacheService
+    from app.services.drive_service import DriveService
     from app.services.filter_service import FilterService
     from app.services.ocr_service import OCRService
 
     cache = CacheService()
     filter_svc = FilterService(cache_service=cache)
     ocr_svc = OCRService()
+    drive_svc = DriveService()
     db = SessionLocal()
-    return db, ocr_svc, filter_svc, SessionModel, Extraction
+    return db, ocr_svc, filter_svc, drive_svc, SessionModel, Extraction
 
 
 @celery_app.task(
@@ -74,7 +76,7 @@ def process_ocr_frame(
 
     Returns a dict with extracted texts and their metadata.
     """
-    db, ocr_svc, filter_svc, SessionModel, Extraction = _get_services()
+    db, ocr_svc, filter_svc, drive_svc, SessionModel, Extraction = _get_services()
 
     try:
         # Validate session exists
@@ -87,6 +89,13 @@ def process_ocr_frame(
 
         # Filter duplicates and apply keyword rules
         filtered_texts = filter_svc.filter_results(ocr_response.texts, session_id)
+
+        # テキストが検出された場合のみ画像をDriveに保存（1フレーム1枚）
+        image_url: Optional[str] = None
+        if filtered_texts:
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+            filename = f"{session_id[:8]}_{ts}.jpg"
+            image_url = drive_svc.upload_frame(frame_b64, filename)
 
         saved_ids: List[str] = []
         for text_result in filtered_texts:
@@ -107,6 +116,7 @@ def process_ocr_frame(
                 longitude=longitude,
                 engine="paddleocr",
                 is_duplicate=is_dup,
+                image_url=image_url,
             )
             db.add(extraction)
             db.flush()

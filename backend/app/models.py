@@ -82,6 +82,7 @@ class Extraction(Base):
     timestamp = Column(DateTime, nullable=False, default=_now)
     engine = Column(String(50), nullable=False, default="paddleocr")
     is_duplicate = Column(Boolean, nullable=False, default=False)
+    image_url = Column(String(500), nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now)
 
     session = relationship("Session", back_populates="extractions")

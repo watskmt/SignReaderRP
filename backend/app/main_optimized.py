@@ -70,8 +70,23 @@ def get_filter_service() -> FilterService:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    _migrate_add_image_url()
     logger.info("SignReader Optimized API started.")
     yield
+
+
+def _migrate_add_image_url() -> None:
+    """既存DBにimage_urlカラムがなければ追加する（冪等）。"""
+    from sqlalchemy import text
+    from app.database import engine
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "ALTER TABLE extractions ADD COLUMN IF NOT EXISTS image_url VARCHAR(500)"
+            ))
+            conn.commit()
+        except Exception:
+            pass
 
 
 app = FastAPI(
