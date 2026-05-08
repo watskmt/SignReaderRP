@@ -2,10 +2,8 @@
 DriveService — Google Drive への画像アップロードと容量管理。
 テキスト検出済みフレームのみ保存し、上限(デフォルト20GB)を超えたら古いものから削除する。
 
-認証: Workload Identity Federation (ADC) を使用。
-  GOOGLE_APPLICATION_CREDENTIALS に WIF 認証情報設定ファイルのパスを指定する。
-  設定ファイルは秘密鍵を含まず、トークン取得方法を記述した JSON。
-  google.auth.default() が自動的に読み込む。
+認証: サービスアカウントキーファイル（JSON）を使用。
+  GOOGLE_DRIVE_CREDENTIALS_FILE にパスを指定する。
 """
 from __future__ import annotations
 
@@ -28,13 +26,13 @@ class DriveService:
 
     def _get_service(self):
         if self._service is None:
-            import google.auth
+            from google.oauth2 import service_account
             from googleapiclient.discovery import build
 
-            # Workload Identity Federation (ADC)
-            # GOOGLE_APPLICATION_CREDENTIALS に WIF 設定ファイルを指定すると
-            # google.auth.default() が自動的に外部トークンを取得・更新する
-            creds, _ = google.auth.default(scopes=DRIVE_SCOPES)
+            creds = service_account.Credentials.from_service_account_file(
+                settings.GOOGLE_DRIVE_CREDENTIALS_FILE,
+                scopes=DRIVE_SCOPES,
+            )
             self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
         return self._service
 
