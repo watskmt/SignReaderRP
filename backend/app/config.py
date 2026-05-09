@@ -23,11 +23,9 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
-    # Google Drive
-    GOOGLE_DRIVE_ENABLED: bool = False
-    GOOGLE_DRIVE_CREDENTIALS_FILE: str = "/app/gcp-credentials.json"
-    GOOGLE_DRIVE_FOLDER_ID: str = ""
-    GOOGLE_DRIVE_MAX_GB: float = 20.0
+    # ローカル画像保存
+    IMAGE_STORAGE_PATH: str = "/app/images"
+    IMAGE_STORAGE_MAX_GB: float = 5.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

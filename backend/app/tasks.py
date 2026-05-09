@@ -45,7 +45,7 @@ def _get_services():
     from app.database import SessionLocal
     from app.models import Extraction, Session as SessionModel
     from app.services.cache_service import CacheService
-    from app.services.drive_service import DriveService
+    from app.services.image_storage_service import ImageStorageService as DriveService
     from app.services.filter_service import FilterService
     from app.services.ocr_service import OCRService
 
@@ -95,7 +95,7 @@ def process_ocr_frame(
         if filtered_texts:
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
             filename = f"{session_id[:8]}_{ts}.jpg"
-            image_url = drive_svc.upload_frame(frame_b64, filename)
+            image_url = drive_svc.save_frame(frame_b64, filename)
 
         saved_ids: List[str] = []
         for text_result in filtered_texts:

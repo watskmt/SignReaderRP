@@ -13,7 +13,8 @@ from typing import Any, Dict, List
 from celery.result import AsyncResult
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -71,6 +72,9 @@ def get_filter_service() -> FilterService:
 async def lifespan(app: FastAPI):
     create_tables()
     _migrate_add_image_url()
+    # 画像保存ディレクトリを作成
+    import os
+    os.makedirs("/app/images", exist_ok=True)
     logger.info("SignReader Optimized API started.")
     yield
 
@@ -103,6 +107,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+import os as _os
+_os.makedirs("/app/images", exist_ok=True)
+app.mount("/images", StaticFiles(directory="/app/images"), name="images")
 
 
 # ─────────────────────────────── Health ──────────────────────────────────────
@@ -140,6 +148,16 @@ def create_session(body: SessionCreate, db: Session = Depends(get_db)) -> Sessio
     db.commit()
     db.refresh(db_session)
     return db_session
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str, db: Session = Depends(get_db)) -> Response:
+    db_session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if db_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    db.delete(db_session)
+    db.commit()
+    return Response(status_code=204)
 
 
 @app.get("/sessions/{session_id}", response_model=SessionResponse)
@@ -395,15 +413,27 @@ def admin_ui() -> str:
   .confidence-fill { height: 100%; border-radius: 3px; background: #198754; }
   .session-card { cursor: pointer; transition: box-shadow .15s; }
   .session-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+  .card.selected { outline: 2px solid #0d6efd; }
   pre { white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
 <body>
 <div class="container py-4">
-  <div class="d-flex align-items-center mb-4">
+  <div class="d-flex align-items-center mb-3">
     <h1 class="h3 mb-0 me-3">SignReader 管理画面</h1>
     <span id="session-count" class="badge bg-secondary">読込中...</span>
     <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSessions()">更新</button>
+  </div>
+
+  <!-- 一括操作バー -->
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <div class="form-check mb-0">
+      <input class="form-check-input" type="checkbox" id="select-all" onchange="toggleSelectAll()">
+      <label class="form-check-label" for="select-all">すべて選択</label>
+    </div>
+    <span id="selected-count" class="text-muted small"></span>
+    <button id="bulk-delete-btn" class="btn btn-danger btn-sm ms-auto d-none"
+      onclick="bulkDelete()">選択したものを削除</button>
   </div>
 
   <div id="sessions-list" class="row g-3"></div>
@@ -469,10 +499,14 @@ async function loadSessions() {
     const statusColor = s.status === 'active' ? 'success' : 'secondary';
     return `
       <div class="col-md-6 col-lg-4">
-        <div class="card session-card h-100" onclick="openSession('${s.id}', '${escHtml(s.title)}')">
-          <div class="card-body">
+        <div class="card h-100" id="card-${s.id}">
+          <div class="card-body session-card" onclick="openSession('${s.id}', '${escHtml(s.title)}')">
             <div class="d-flex justify-content-between align-items-start mb-2">
-              <h6 class="card-title mb-0">${escHtml(s.title)}</h6>
+              <div class="d-flex align-items-center gap-2">
+                <input class="form-check-input session-checkbox" type="checkbox"
+                  value="${s.id}" onclick="event.stopPropagation(); updateSelection()">
+                <h6 class="card-title mb-0">${escHtml(s.title)}</h6>
+              </div>
               <span class="badge bg-${statusColor}">${s.status}</span>
             </div>
             <p class="text-muted small mb-2">${date}</p>
@@ -481,6 +515,10 @@ async function loadSessions() {
               <div class="col"><div class="fw-bold">${stats.unique_texts ?? '-'}</div><div class="text-muted" style="font-size:.75rem">ユニーク</div></div>
               <div class="col"><div class="fw-bold">${stats.duplicate_extractions ?? '-'}</div><div class="text-muted" style="font-size:.75rem">重複</div></div>
             </div>
+          </div>
+          <div class="card-footer bg-transparent p-2">
+            <button class="btn btn-outline-danger btn-sm w-100"
+              onclick="confirmDelete('${s.id}', '${escHtml(s.title)}')">削除</button>
           </div>
         </div>
       </div>`;
@@ -533,6 +571,47 @@ function renderExtractions() {
       </tr>`;
     }).join('');
   document.getElementById('extraction-tbody').innerHTML = rows || '<tr><td colspan="5" class="text-center text-muted">データなし</td></tr>';
+}
+
+function getSelectedIds() {
+  return [...document.querySelectorAll('.session-checkbox:checked')].map(c => c.value);
+}
+
+function updateSelection() {
+  const ids = getSelectedIds();
+  const total = document.querySelectorAll('.session-checkbox').length;
+  document.getElementById('selected-count').textContent = ids.length ? `${ids.length} 件選択中` : '';
+  document.getElementById('bulk-delete-btn').classList.toggle('d-none', ids.length === 0);
+  document.getElementById('select-all').indeterminate = ids.length > 0 && ids.length < total;
+  document.getElementById('select-all').checked = ids.length === total && total > 0;
+  ids.forEach(id => document.getElementById('card-' + id)?.classList.add('selected'));
+  document.querySelectorAll('.session-checkbox:not(:checked)').forEach(c => {
+    document.getElementById('card-' + c.value)?.classList.remove('selected');
+  });
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('select-all').checked;
+  document.querySelectorAll('.session-checkbox').forEach(c => c.checked = checked);
+  updateSelection();
+}
+
+async function bulkDelete() {
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  if (!confirm(`${ids.length} 件のセッションを削除しますか？この操作は元に戻せません。`)) return;
+  await Promise.all(ids.map(id => fetch(BASE + '/sessions/' + id, { method: 'DELETE' })));
+  loadSessions();
+}
+
+async function confirmDelete(id, title) {
+  if (!confirm(`「${title}」を削除しますか？この操作は元に戻せません。`)) return;
+  const res = await fetch(BASE + '/sessions/' + id, { method: 'DELETE' });
+  if (res.ok || res.status === 204) {
+    loadSessions();
+  } else {
+    alert('削除に失敗しました');
+  }
 }
 
 function escHtml(s) {
