@@ -42,8 +42,9 @@ interface Props {
   route: RouteProp<RootStackParamList, 'Camera'>;
 }
 
-const FRAME_INTERVAL_MS = 500;
+const FRAME_INTERVAL_MS = 1000;
 const TASK_POLL_INTERVAL_MS = 800;
+const MAX_PENDING_TASKS = 2;
 
 export default function CameraScreen({ navigation }: Props): React.JSX.Element {
   const cameraRef = useRef<Camera>(null);
@@ -193,6 +194,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
   const handleFrame = useCallback(
     async (frame: string) => {
       if (isUploadingRef.current) return;
+      if (pendingTasksRef.current.size >= MAX_PENDING_TASKS) return;
       isUploadingRef.current = true;
       try {
         const session = await ensureSession();
