@@ -34,6 +34,10 @@ if [[ -n "$SSH_KEY_FILE" ]]; then
     if [[ ! -f "$SSH_KEY_FILE" ]]; then
         error "SSH 鍵ファイルが見つかりません: $SSH_KEY_FILE (DEPLOY_SSH_KEY=$DEPLOY_SSH_KEY)"
     fi
+    # 鍵ファイルの形式を簡易チェック (PEM 形式のヘッダーがあるか)
+    if ! head -n 1 "$SSH_KEY_FILE" | grep -q "BEGIN "; then
+        warn "警告: SSH 鍵ファイルが正しい PEM 形式（-----BEGIN ...）でない可能性があります。"
+    fi
     chmod 600 "$SSH_KEY_FILE"
 fi
 

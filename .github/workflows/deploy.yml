@@ -16,7 +16,9 @@ jobs:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/webarena
+          # 秘密鍵を書き出し、改行コードを LF に統一し、末尾に確実に改行を追加
+          printf "%s" "$SSH_KEY" | tr -d '\r' > ~/.ssh/webarena
+          echo "" >> ~/.ssh/webarena
           chmod 600 ~/.ssh/webarena
           ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
