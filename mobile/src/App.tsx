@@ -40,7 +40,7 @@ export default function App(): React.JSX.Element {
             <Stack.Screen
               name="Camera"
               component={CameraScreen}
-              options={{ title: 'SignReader' }}
+              options={{ title: 'Pi Monitor' }}
             />
             <Stack.Screen
               name="SessionList"

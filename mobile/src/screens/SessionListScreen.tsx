@@ -101,7 +101,7 @@ export default function SessionListScreen({ navigation }: Props): React.JSX.Elem
       clearExtractions();
       setShowModal(false);
       setNewTitle('');
-      navigation.navigate('Camera');
+      navigation.navigate('Results', { sessionId: session.id, sessionTitle: session.title });
     } catch (err) {
       Alert.alert('Error', 'Failed to create session. Check your connection.');
     } finally {

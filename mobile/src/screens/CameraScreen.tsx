@@ -1,439 +1,270 @@
 /**
- * CameraScreen — main recording screen.
- * Shows the camera feed, start/stop recording button, GPS toggle,
- * and a scrollable overlay of recently extracted texts.
+ * PiMonitorScreen — live view of extractions coming from the Raspberry Pi webcam.
+ *
+ * Polls the backend every 3 seconds for the most recent active session and its
+ * extractions. No camera or recording logic — capture is handled by the Pi.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  AppState,
-  FlatList,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  Camera,
-  useCameraDevice,
-  useCameraPermission,
-} from 'react-native-vision-camera';
-import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 
-import { useAppContext } from '../context/AppContext';
 import type { RootStackParamList } from '../App';
-import cameraService from '../services/camera';
-import storageService from '../services/storage';
-import { createSession, processOCRAsync, getTaskStatus, getExtractions } from '../services/api';
+import { listSessions, getExtractions, type ExtractionResponse } from '../services/api';
+import { useAppContext } from '../context/AppContext';
 
-type CameraScreenNavigationProp = NativeStackNavigationProp<
-  RootStackParamList,
-  'Camera'
->;
-
-interface Props {
-  navigation: CameraScreenNavigationProp;
+type Props = {
+  navigation: NativeStackNavigationProp<RootStackParamList, 'Camera'>;
   route: RouteProp<RootStackParamList, 'Camera'>;
-}
+};
 
-const FRAME_INTERVAL_MS = 1000;
-const TASK_POLL_INTERVAL_MS = 800;
-const MAX_PENDING_TASKS = 2;
+const POLL_INTERVAL_MS = 3000;
 
-export default function CameraScreen({ navigation }: Props): React.JSX.Element {
-  const cameraRef = useRef<Camera>(null);
-  const device = useCameraDevice('back');
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const captureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pendingTasksRef = useRef<Set<string>>(new Set());
-  const isUploadingRef = useRef(false);
-
-  const {
-    currentSession,
-    extractions,
-    isRecording,
-    gpsEnabled,
-    setCurrentSession,
-    addExtraction,
-    clearExtractions,
-    setRecording,
-    setGpsEnabled,
-  } = useAppContext();
-
+export default function PiMonitorScreen({ navigation }: Props): React.JSX.Element {
   const isFocused = useIsFocused();
-  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-  const [cameraReady, setCameraReady] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Ready');
-  const [processingCount, setProcessingCount] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      setAppActive(state === 'active');
-    });
-    return () => sub.remove();
-  }, []);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionTitle, setActiveSessionTitle] = useState<string>('');
+  const [extractions, setExtractions] = useState<ExtractionResponse[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'live' | 'idle' | 'error'>('connecting');
 
-  useEffect(() => {
-    if (!isFocused || !appActive) {
-      setCameraReady(false);
-    }
-  }, [isFocused, appActive]);
+  const { addExtraction } = useAppContext();
 
-  // ──────────────────────────────── Permissions ─────────────────────────────
-
-  useEffect(() => {
-    (async () => {
-      if (!hasPermission) {
-        const granted = await requestPermission();
-        if (!granted) {
-          Alert.alert(
-            'Camera Permission Required',
-            'Please grant camera access in Settings to use SignReader.',
-          );
-        }
-      }
-    })();
-  }, [hasPermission, requestPermission]);
-
-  // ──────────────────────────────── GPS toggle ──────────────────────────────
-
-  const handleGpsToggle = useCallback(async () => {
-    if (!gpsEnabled) {
-      const hasLocation = await cameraService.requestLocationPermission();
-      if (!hasLocation) {
-        Alert.alert(
-          'Location Permission',
-          'Location access was denied. GPS tagging will be disabled.',
-        );
+  const fetchLatestSession = useCallback(async () => {
+    try {
+      const sessions = await listSessions(10);
+      const active = sessions.find((s) => s.status === 'active') ?? sessions[0] ?? null;
+      if (!active) {
+        setConnectionStatus('idle');
+        setActiveSessionId(null);
         return;
       }
-    }
-    setGpsEnabled(!gpsEnabled);
-  }, [gpsEnabled, setGpsEnabled]);
-
-  // ──────────────────────────────── Session management ──────────────────────
-
-  const ensureSession = useCallback(async () => {
-    if (currentSession) {
-      return currentSession;
-    }
-    const now = new Date().toISOString().slice(0, 10);
-    const session = await createSession({ title: `Session ${now}` });
-    await storageService.saveSession(session);
-    await storageService.setCurrentSessionId(session.id);
-    setCurrentSession(session);
-    return session;
-  }, [currentSession, setCurrentSession]);
-
-  // ──────────────────────────────── Task polling ────────────────────────────
-
-  const pollTask = useCallback(
-    async (taskId: string, sessionId: string) => {
-      const maxAttempts = 20;
-      let attempts = 0;
-
-      const poll = async (): Promise<void> => {
-        attempts++;
-        try {
-          const status = await getTaskStatus(taskId);
-          if (status.status === 'success' && status.result) {
-            const result = status.result as {
-              extraction_ids?: string[];
-              texts_found?: number;
-            };
-            setStatusMessage(`Found ${result.texts_found ?? 0} text(s)`);
-            pendingTasksRef.current.delete(taskId);
-            setProcessingCount((c) => Math.max(0, c - 1));
-
-            try {
-              const fetched = await getExtractions(sessionId);
-              fetched.forEach((ext) => addExtraction({
-                id: ext.id,
-                session_id: ext.session_id,
-                content: ext.content,
-                confidence: ext.confidence,
-                bounding_box: ext.bounding_box,
-                latitude: ext.latitude,
-                longitude: ext.longitude,
-                altitude: ext.altitude,
-                timestamp: ext.timestamp,
-                engine: ext.engine,
-                is_duplicate: ext.is_duplicate,
-              }));
-            } catch {
-              // extraction fetch failed — data is on server but UI won't update
-            }
-          } else if (status.status === 'failure') {
-            pendingTasksRef.current.delete(taskId);
-            setProcessingCount((c) => Math.max(0, c - 1));
-          } else if (attempts < maxAttempts) {
-            setTimeout(poll, TASK_POLL_INTERVAL_MS);
-          } else {
-            pendingTasksRef.current.delete(taskId);
-            setProcessingCount((c) => Math.max(0, c - 1));
-          }
-        } catch {
-          pendingTasksRef.current.delete(taskId);
-          setProcessingCount((c) => Math.max(0, c - 1));
-        }
-      };
-
-      setTimeout(poll, TASK_POLL_INTERVAL_MS);
-    },
-    [addExtraction, setProcessingCount],
-  );
-
-  // ──────────────────────────────── Frame capture ───────────────────────────
-
-  const handleFrame = useCallback(
-    async (frame: string) => {
-      if (isUploadingRef.current) return;
-      if (pendingTasksRef.current.size >= MAX_PENDING_TASKS) return;
-      isUploadingRef.current = true;
-      try {
-        const session = await ensureSession();
-
-        let lat: number | null = null;
-        let lon: number | null = null;
-
-        if (gpsEnabled) {
-          try {
-            const coords = await cameraService.getCurrentLocation();
-            lat = coords.latitude;
-            lon = coords.longitude;
-          } catch {
-            // GPS unavailable — continue without coordinates
-          }
-        }
-
-        const task = await processOCRAsync(frame, session.id, lat, lon);
-        pendingTasksRef.current.add(task.task_id);
-        setProcessingCount((c) => c + 1);
-        void pollTask(task.task_id, session.id);
-      } catch (err) {
-        console.warn('[CameraScreen] Frame processing error:', err);
-        setStatusMessage('Upload error — retrying');
-      } finally {
-        isUploadingRef.current = false;
+      if (active.id !== activeSessionId) {
+        setActiveSessionId(active.id);
+        setActiveSessionTitle(active.title);
+        setExtractions([]);
       }
-    },
-    [ensureSession, gpsEnabled, pollTask],
-  );
-
-  // ──────────────────────────────── Record toggle ───────────────────────────
-
-  const handleRecordToggle = useCallback(async () => {
-    if (isRecording) {
-      // Stop
-      if (captureIntervalRef.current !== null) {
-        cameraService.stopFrameCapture(captureIntervalRef.current);
-        captureIntervalRef.current = null;
-      }
-      setRecording(false);
-      setStatusMessage('Stopped');
-    } else {
-      // Start
-      await ensureSession();
-      clearExtractions();
-      setRecording(true);
-      setStatusMessage('Recording…');
-
-      captureIntervalRef.current = cameraService.startFrameCapture(
-        cameraRef,
-        FRAME_INTERVAL_MS,
-        handleFrame,
-      );
+    } catch {
+      setConnectionStatus('error');
     }
-  }, [isRecording, ensureSession, clearExtractions, setRecording, handleFrame]);
+  }, [activeSessionId]);
 
-  // Clean up on unmount
+  const fetchExtractions = useCallback(async (sessionId: string) => {
+    try {
+      const fetched = await getExtractions(sessionId);
+      setExtractions(fetched.filter((e) => !e.is_duplicate));
+      setLastUpdated(new Date());
+      setConnectionStatus('live');
+      fetched.forEach((ext) => addExtraction({
+        id: ext.id,
+        session_id: ext.session_id,
+        content: ext.content,
+        confidence: ext.confidence,
+        bounding_box: ext.bounding_box,
+        latitude: ext.latitude,
+        longitude: ext.longitude,
+        altitude: ext.altitude,
+        timestamp: ext.timestamp,
+        engine: ext.engine,
+        is_duplicate: ext.is_duplicate,
+      }));
+    } catch {
+      setConnectionStatus('error');
+    }
+  }, [addExtraction]);
+
+  const poll = useCallback(async () => {
+    await fetchLatestSession();
+    if (activeSessionId) {
+      await fetchExtractions(activeSessionId);
+    }
+  }, [fetchLatestSession, fetchExtractions, activeSessionId]);
+
   useEffect(() => {
+    if (!isFocused) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+    poll();
+    pollRef.current = setInterval(poll, POLL_INTERVAL_MS);
     return () => {
-      if (captureIntervalRef.current !== null) {
-        cameraService.stopFrameCapture(captureIntervalRef.current);
-      }
+      if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  }, [isFocused, poll]);
 
-  // ──────────────────────────────── Render ──────────────────────────────────
+  const statusColor = {
+    connecting: '#ff9800',
+    live: '#4caf50',
+    idle: '#888',
+    error: '#e53935',
+  }[connectionStatus];
 
-  if (!device) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.statusText}>No camera device found</Text>
-      </View>
-    );
-  }
+  const statusLabel = {
+    connecting: '接続中...',
+    live: 'Pi からライブ受信中',
+    idle: 'Pi からのセッションを待機中',
+    error: '接続エラー',
+  }[connectionStatus];
 
   return (
     <View style={styles.container}>
-      <Camera
-        ref={cameraRef}
-        style={styles.camera}
-        device={device}
-        isActive={isFocused && appActive}
-        photo={true}
-        onInitialized={() => setCameraReady(true)}
-      />
+      {/* Header status bar */}
+      <View style={styles.header}>
+        <View style={styles.statusRow}>
+          <View style={[styles.dot, { backgroundColor: statusColor }]} />
+          <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+        </View>
+        {activeSessionTitle ? (
+          <Text style={styles.sessionLabel} numberOfLines={1}>
+            {activeSessionTitle}
+          </Text>
+        ) : null}
+        {lastUpdated ? (
+          <Text style={styles.updatedText}>
+            最終更新: {lastUpdated.toLocaleTimeString('ja-JP')}
+          </Text>
+        ) : null}
+      </View>
 
-      {/* Overlay panel */}
-      <View style={styles.overlay}>
-        {/* Status bar */}
-        <View style={styles.statusBar}>
-          <View style={styles.statusLeft}>
-            {processingCount > 0 ? (
-              <ActivityIndicator size="small" color="#ff9800" style={styles.spinner} />
-            ) : (
-              <View style={styles.idleDot} />
-            )}
-            <Text style={processingCount > 0 ? styles.processingText : styles.statusText}>
-              {processingCount > 0 ? `変換中… (${processingCount})` : statusMessage}
+      {/* Extractions list */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {connectionStatus === 'connecting' && extractions.length === 0 ? (
+          <ActivityIndicator color="#4caf50" style={styles.loader} />
+        ) : extractions.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>📡</Text>
+            <Text style={styles.emptyTitle}>
+              {connectionStatus === 'idle'
+                ? 'Pi の起動を待っています'
+                : 'テキストを検出中...'}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              Raspberry Pi Zero W のキャプチャクライアントが起動すると{'\n'}
+              ここにリアルタイムで結果が表示されます
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.gpsButton}
-            onPress={handleGpsToggle}
-          >
-            <Text style={styles.gpsText}>
-              GPS {gpsEnabled ? 'ON' : 'OFF'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Extracted texts list */}
-        <ScrollView style={styles.resultsContainer} nestedScrollEnabled>
-          {extractions.length === 0 ? (
-            <Text style={styles.emptyText}>
-              {isRecording
-                ? 'Scanning for text…'
-                : 'Tap Record to start scanning'}
-            </Text>
-          ) : (
-            extractions
-              .filter((e) => !e.is_duplicate)
-              .slice(-10)
-              .map((ext) => (
-                <View key={ext.id} style={styles.extractionItem}>
-                  <Text style={styles.extractionText}>{ext.content}</Text>
-                  <Text style={styles.confidenceText}>
+        ) : (
+          [...extractions]
+            .sort(
+              (a, b) =>
+                new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+            )
+            .map((ext) => (
+              <View key={ext.id} style={styles.card}>
+                <Text style={styles.cardText}>{ext.content}</Text>
+                <View style={styles.cardMeta}>
+                  <Text style={styles.confidence}>
                     {Math.round(ext.confidence * 100)}%
                   </Text>
+                  <Text style={styles.timestamp}>
+                    {new Date(ext.timestamp).toLocaleTimeString('ja-JP')}
+                  </Text>
                 </View>
-              ))
-          )}
-        </ScrollView>
+              </View>
+            ))
+        )}
+      </ScrollView>
 
-        {/* Controls */}
-        <View style={styles.controls}>
+      {/* Bottom controls */}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={styles.sessionsButton}
+          onPress={() => navigation.navigate('SessionList')}
+        >
+          <Text style={styles.sessionsButtonText}>セッション一覧</Text>
+        </TouchableOpacity>
+        {activeSessionId ? (
           <TouchableOpacity
-            style={[
-              styles.recordButton,
-              isRecording && styles.recordButtonActive,
-              !cameraReady && styles.recordButtonDisabled,
-            ]}
-            onPress={handleRecordToggle}
-            disabled={!cameraReady}
+            style={styles.resultsButton}
+            onPress={() =>
+              navigation.navigate('Results', {
+                sessionId: activeSessionId,
+                sessionTitle: activeSessionTitle,
+              })
+            }
           >
-            <Text style={styles.recordButtonText}>
-              {isRecording ? 'Stop' : 'Record'}
-            </Text>
+            <Text style={styles.resultsButtonText}>詳細を見る</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.sessionsButton}
-            onPress={() => navigation.navigate('SessionList')}
-          >
-            <Text style={styles.sessionsButtonText}>Sessions</Text>
-          </TouchableOpacity>
-        </View>
+        ) : null}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  camera: { flex: 1 },
-  overlay: {
+  container: { flex: 1, backgroundColor: '#0f0f1a' },
+  header: {
+    backgroundColor: '#1a1a2e',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: Platform.OS === 'ios' ? 12 : 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  statusText: { fontSize: 13, fontWeight: '600' },
+  sessionLabel: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginBottom: 2 },
+  updatedText: { color: '#555', fontSize: 11 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16, paddingBottom: 100 },
+  loader: { marginTop: 60 },
+  emptyContainer: { alignItems: 'center', marginTop: 60, paddingHorizontal: 32 },
+  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
+  emptySubtitle: { color: '#555', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  card: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 10,
+  },
+  cardText: { color: '#fff', fontSize: 15, marginBottom: 8, lineHeight: 22 },
+  cardMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  confidence: { color: '#4caf50', fontSize: 12, fontWeight: '600' },
+  timestamp: { color: '#555', fontSize: 11 },
+  footer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
     paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    backgroundColor: '#0f0f1a',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
-  statusBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  sessionsButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#1a1a2e',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  statusLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  statusText: { color: '#aaa', fontSize: 12 },
-  processingText: { color: '#ff9800', fontSize: 12, fontWeight: '600' },
-  spinner: { marginRight: 6 },
-  idleDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4caf50',
-    marginRight: 6,
-  },
-  gpsButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  gpsText: { color: '#fff', fontSize: 12 },
-  resultsContainer: {
-    maxHeight: 160,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  emptyText: { color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', paddingVertical: 8 },
-  extractionItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-  },
-  extractionText: { color: '#fff', fontSize: 14, flex: 1 },
-  confidenceText: { color: '#4caf50', fontSize: 12, marginLeft: 8 },
-  controls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    gap: 16,
-  },
-  recordButton: {
+  sessionsButtonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  resultsButton: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 10,
     backgroundColor: '#e53935',
     alignItems: 'center',
   },
-  recordButtonActive: { backgroundColor: '#666' },
-  recordButtonDisabled: { opacity: 0.4 },
-  recordButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  sessionsButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-  },
-  sessionsButtonText: { color: '#fff', fontSize: 16 },
+  resultsButtonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });

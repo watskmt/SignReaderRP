@@ -88,6 +88,16 @@ def create_session(body: SessionCreate, db: Session = Depends(get_db)) -> Sessio
     return db_session
 
 
+@app.get("/sessions", response_model=List[SessionResponse])
+def list_sessions(limit: int = 20, db: Session = Depends(get_db)) -> List[SessionModel]:
+    return (
+        db.query(SessionModel)
+        .order_by(SessionModel.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
 @app.get("/sessions/{session_id}", response_model=SessionResponse)
 def get_session(session_id: str, db: Session = Depends(get_db)) -> SessionModel:
     db_session = db.query(SessionModel).filter(SessionModel.id == session_id).first()

@@ -90,6 +90,13 @@ export async function healthCheck(): Promise<HealthResponse> {
   return response.data;
 }
 
+export async function listSessions(limit = 20): Promise<SessionResponse[]> {
+  const response = await apiClient.get<SessionResponse[]>('/sessions', {
+    params: { limit },
+  });
+  return response.data;
+}
+
 export async function createSession(
   data: CreateSessionRequest,
 ): Promise<SessionResponse> {
