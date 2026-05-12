@@ -6,6 +6,8 @@
 
 SignReader はモバイル端末からビデオフレームを取得し、FastAPI バックエンドへ送信して PaddleOCR で OCR 処理を行います。ファジーマッチングで重複を排除し、GPS 座標と共に PostgreSQL へ保存します。モバイルクライアントは React Native 0.75 と TypeScript で構築しています。
 
+詳細な開発者向けドキュメントは [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) を参照してください。
+
 ## ユースケース
 
 - フィールド調査での街路標識・店舗看板・建物案内の記録
@@ -50,6 +52,7 @@ SignReader/
 ├── .gitignore
 ├── README.md
 ├── SPECIFICATION.md
+├── DEVELOPER_GUIDE.md
 ├── TESTING_GUIDE.md
 ├── deploy.sh                        # デプロイスクリプト
 ├── scripts/
