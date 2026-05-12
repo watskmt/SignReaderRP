@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
 
+    # Gemini validation
+    GEMINI_API_KEY: str = ""
+    GEMINI_VALIDATION_ENABLED: bool = False
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MIN_PROBABILITY: float = 0.5
+
     # ローカル画像保存
     IMAGE_STORAGE_PATH: str = "/app/images"
     IMAGE_STORAGE_MAX_GB: float = 5.0

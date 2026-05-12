@@ -47,14 +47,16 @@ def _get_services():
     from app.services.cache_service import CacheService
     from app.services.image_storage_service import ImageStorageService as DriveService
     from app.services.filter_service import FilterService
+    from app.services.gemini_service import GeminiService
     from app.services.ocr_service import OCRService
 
     cache = CacheService()
     filter_svc = FilterService(cache_service=cache)
     ocr_svc = OCRService()
     drive_svc = DriveService()
+    gemini_svc = GeminiService()
     db = SessionLocal()
-    return db, ocr_svc, filter_svc, drive_svc, SessionModel, Extraction
+    return db, ocr_svc, filter_svc, drive_svc, gemini_svc, SessionModel, Extraction
 
 
 @celery_app.task(
@@ -76,7 +78,7 @@ def process_ocr_frame(
 
     Returns a dict with extracted texts and their metadata.
     """
-    db, ocr_svc, filter_svc, drive_svc, SessionModel, Extraction = _get_services()
+    db, ocr_svc, filter_svc, drive_svc, gemini_svc, SessionModel, Extraction = _get_services()
 
     try:
         # Validate session exists
@@ -89,6 +91,11 @@ def process_ocr_frame(
 
         # Filter duplicates and apply keyword rules
         filtered_texts = filter_svc.filter_results(ocr_response.texts, session_id)
+
+        # Gemini: discard texts that don't look like real sign text
+        if settings.GEMINI_VALIDATION_ENABLED and filtered_texts:
+            keep_flags = gemini_svc.validate_texts([t.content for t in filtered_texts])
+            filtered_texts = [t for t, keep in zip(filtered_texts, keep_flags) if keep]
 
         # テキストが検出された場合のみ画像をDriveに保存（1フレーム1枚）
         image_url: Optional[str] = None
