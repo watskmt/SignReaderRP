@@ -594,7 +594,7 @@ async function openSession(id, title) {
   allExtractions = await extRes.json();
   const stats = await statsRes.json();
 
-  const lowConf = allExtractions.filter(e => e.confidence <= 0.80).length;
+  const lowConf = allExtractions.filter(e => e.confidence < 0.80).length;
   document.getElementById('modal-stats').innerHTML = `
     <div class="col-auto"><span class="badge bg-primary">${stats.total_extractions} 件</span></div>
     <div class="col-auto"><span class="badge bg-success">${stats.unique_texts} ユニーク</span></div>
@@ -610,7 +610,7 @@ const MIN_CONFIDENCE = 0.81;
 function renderExtractions() {
   const hideDup = document.getElementById('hide-duplicates').checked;
   const rows = allExtractions
-    .filter(e => e.confidence > 0.80)
+    .filter(e => e.confidence >= 0.80)
     .filter(e => !hideDup || !e.is_duplicate)
     .map(e => {
       const pct = Math.round(e.confidence * 100);

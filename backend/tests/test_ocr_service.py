@@ -75,10 +75,10 @@ def test_extract_text_filters_low_confidence() -> None:
     svc = OCRService()
     paddle_result = _mock_paddle_result([
         ("STOP", 0.95),
-        ("blurry", 0.30),    # Below threshold 0.81
-        ("YIELD", 0.72),     # Below threshold 0.81
-        ("CAUTION", 0.80),   # At 80% — excluded by 0.81 threshold
-        ("SPEED LIMIT", 0.81),  # At threshold — included
+        ("blurry", 0.30),    # Below threshold 0.80
+        ("YIELD", 0.72),     # Below threshold 0.80
+        ("CAUTION", 0.80),   # At threshold — included (>= 0.80)
+        ("LOW", 0.79),       # Just below — excluded
         ("EXIT", 0.82),
     ])
 
@@ -91,9 +91,9 @@ def test_extract_text_filters_low_confidence() -> None:
 
     texts = [r.content for r in results]
     assert "STOP" in texts
-    assert "SPEED LIMIT" in texts
+    assert "CAUTION" in texts   # 80% is included
     assert "EXIT" in texts
-    assert "CAUTION" not in texts   # 80% is excluded
+    assert "LOW" not in texts   # 79% is excluded
     assert "YIELD" not in texts
     assert "blurry" not in texts
 
