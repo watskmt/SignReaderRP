@@ -17,16 +17,22 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           # 秘密鍵を書き出し、改行コードを LF に統一し、末尾に確実に改行を追加
-          printf "%s" "$SSH_KEY" | tr -d '\r' > ~/.ssh/webarena
-          echo "" >> ~/.ssh/webarena
+          # もし Base64 で保存されている場合を考慮して、-----BEGIN がなければ base64 デコードを試みる
+          echo "$SSH_KEY" | tr -d '\r' > ~/.ssh/webarena.tmp
+          if ! grep -q "BEGIN " ~/.ssh/webarena.tmp; then
+            echo "Debug: PEM header not found, attempting base64 decode"
+            if base64 -d ~/.ssh/webarena.tmp > ~/.ssh/webarena 2>/dev/null; then
+              echo "Debug: Base64 decode successful"
+            else
+              echo "Debug: Base64 decode failed, using original"
+              mv ~/.ssh/webarena.tmp ~/.ssh/webarena
+            fi
+          else
+            mv ~/.ssh/webarena.tmp ~/.ssh/webarena
+          fi
           
-          # デバッグ情報 (形式の確認のみ、鍵の内容は見せない)
-          echo "Debug: Key file stats"
-          ls -l ~/.ssh/webarena
-          echo "Debug: First 20 characters of the key file"
-          head -c 20 ~/.ssh/webarena | od -A n -t x1
-          echo "Debug: File command output"
-          file ~/.ssh/webarena
+          # 末尾に改行を保証
+          echo "" >> ~/.ssh/webarena
 
           chmod 600 ~/.ssh/webarena
           ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
