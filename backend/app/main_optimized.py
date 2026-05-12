@@ -246,21 +246,44 @@ def process_ocr_async(
 
 @app.get("/tasks/queue-stats")
 def queue_stats() -> dict:
-    """Return active/queued Celery task counts for the admin UI."""
+    """Return active/queued Celery task counts and per-session processing state."""
     try:
         inspect = celery_app.control.inspect(timeout=1.0)
         active = inspect.active() or {}
         reserved = inspect.reserved() or {}
+
+        active_sessions: dict = {}
+        queued_sessions: dict = {}
+
+        for tasks in active.values():
+            for task in tasks:
+                args = task.get("args", [])
+                if len(args) >= 2:
+                    sid = args[1]
+                    active_sessions[sid] = active_sessions.get(sid, 0) + 1
+
+        for tasks in reserved.values():
+            for task in tasks:
+                args = task.get("args", [])
+                if len(args) >= 2:
+                    sid = args[1]
+                    queued_sessions[sid] = queued_sessions.get(sid, 0) + 1
+
+        processing_sessions = {
+            sid: {"active": active_sessions.get(sid, 0), "queued": queued_sessions.get(sid, 0)}
+            for sid in set(list(active_sessions) + list(queued_sessions))
+        }
+
         active_count = sum(len(v) for v in active.values())
         queued_count = sum(len(v) for v in reserved.values())
         return {
             "active": active_count,
             "queued": queued_count,
             "total": active_count + queued_count,
-            "workers": len(active),
+            "processing_sessions": processing_sessions,
         }
     except Exception:
-        return {"active": 0, "queued": 0, "total": 0, "workers": 0, "error": "unreachable"}
+        return {"active": 0, "queued": 0, "total": 0, "processing_sessions": {}, "error": "unreachable"}
 
 
 @app.get("/tasks/{task_id}", response_model=TaskStatusResponse)
@@ -445,12 +468,12 @@ def admin_ui() -> str:
 <div class="container py-4">
   <div class="d-flex align-items-center mb-3">
     <h1 class="h3 mb-0 me-3">SignReader 管理画面</h1>
-    <span id="session-count" class="badge bg-secondary me-3">読込中...</span>
-    <div id="queue-indicator">
+    <span id="session-count" class="badge bg-secondary me-2">読込中...</span>
+    <div id="queue-indicator" class="me-auto">
       <div class="queue-dot idle" id="queue-dot"></div>
       <span id="queue-label" class="text-muted">待機中</span>
     </div>
-    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSessions()">更新</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="loadSessions()">更新</button>
   </div>
 
   <!-- 一括操作バー -->
@@ -535,7 +558,10 @@ async function loadSessions() {
                   value="${s.id}" onclick="event.stopPropagation(); updateSelection()">
                 <h6 class="card-title mb-0">${escHtml(s.title)}</h6>
               </div>
-              <span class="badge bg-${statusColor}">${s.status}</span>
+              <div class="d-flex align-items-center gap-1">
+                <span id="proc-${s.id}" class="d-none"></span>
+                <span class="badge bg-${statusColor}">${s.status}</span>
+              </div>
             </div>
             <p class="text-muted small mb-2">${date}</p>
             <div class="row text-center g-1">
@@ -654,9 +680,11 @@ async function updateQueueStats() {
     const data = await res.json();
     const dot = document.getElementById('queue-dot');
     const label = document.getElementById('queue-label');
+
+    // グローバル表示
     if (data.total > 0) {
       dot.className = 'queue-dot busy';
-      label.textContent = `変換中 ${data.active} 件 / キュー ${data.queued} 件`;
+      label.textContent = `変換中 ${data.total} 件`;
       label.style.color = '#fd7e14';
       label.style.fontWeight = '600';
     } else {
@@ -665,6 +693,24 @@ async function updateQueueStats() {
       label.style.color = '';
       label.style.fontWeight = '';
     }
+
+    // セッションごとのバッジ更新
+    const processing = data.processing_sessions || {};
+    document.querySelectorAll('[id^="proc-"]').forEach(el => {
+      const sid = el.id.replace('proc-', '');
+      const info = processing[sid];
+      if (info) {
+        const total = (info.active || 0) + (info.queued || 0);
+        el.className = '';
+        el.innerHTML = `<span class="badge bg-warning text-dark d-inline-flex align-items-center gap-1">
+          <span class="spinner-border spinner-border-sm" style="width:.6rem;height:.6rem"></span>
+          変換中 ${total}
+        </span>`;
+      } else {
+        el.className = 'd-none';
+        el.innerHTML = '';
+      }
+    });
   } catch {}
 }
 
