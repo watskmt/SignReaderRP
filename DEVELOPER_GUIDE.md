@@ -121,5 +121,6 @@
 
 詳細は `deploy.sh`、`.github/workflows/deploy.yml` および `README.md` を参照してください。
 基本手順:
-1. `main` ブランチへ `git push` (GitHub Actions が自動デプロイを開始)
+1. `master` ブランチへ `git push` (GitHub Actions が自動デプロイを開始)
+   - 注: GitHub Secrets の `DEPLOY_SSH_KEY` には秘密鍵の**内容**を登録してください。
 2. 手動デプロイが必要な場合は、適切な環境変数（`SERVER_HOST`, `SERVER_USER`, `DEPLOY_SSH_KEY` (秘密鍵へのパス)）を設定して `./deploy.sh deploy` を実行
