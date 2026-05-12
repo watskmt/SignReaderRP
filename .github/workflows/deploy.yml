@@ -19,9 +19,18 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_rsa
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null && echo "SSH key valid" || { echo "SSH key invalid"; exit 1; }
+          # 改行が \n リテラルとして保存されている場合に修正
+          if [ "$(wc -l < ~/.ssh/id_rsa)" -le 2 ]; then
+            sed -i 's/\\n/\n/g' ~/.ssh/id_rsa
+          fi
+          ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null && echo "SSH key valid" || {
+            echo "SSH key invalid"
+            echo "  lines: $(wc -l < ~/.ssh/id_rsa), bytes: $(wc -c < ~/.ssh/id_rsa)"
+            echo "  first 50 chars: $(head -c 50 ~/.ssh/id_rsa)"
+            exit 1
+          }
           ssh-keyscan -p "$SERVER_PORT" "$SERVER_HOST" >> ~/.ssh/known_hosts
 
       - name: Deploy with deploy.sh
