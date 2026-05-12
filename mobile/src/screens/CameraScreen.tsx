@@ -5,7 +5,9 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Platform,
   Pressable,
@@ -64,8 +66,23 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
   } = useAppContext();
 
   const isFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [cameraReady, setCameraReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState('Ready');
+  const [processingCount, setProcessingCount] = useState(0);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      setAppActive(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused || !appActive) {
+      setCameraReady(false);
+    }
+  }, [isFocused, appActive]);
 
   // ──────────────────────────────── Permissions ─────────────────────────────
 
@@ -131,6 +148,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
             };
             setStatusMessage(`Found ${result.texts_found ?? 0} text(s)`);
             pendingTasksRef.current.delete(taskId);
+            setProcessingCount((c) => Math.max(0, c - 1));
 
             try {
               const fetched = await getExtractions(sessionId);
@@ -152,17 +170,22 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
             }
           } else if (status.status === 'failure') {
             pendingTasksRef.current.delete(taskId);
+            setProcessingCount((c) => Math.max(0, c - 1));
           } else if (attempts < maxAttempts) {
             setTimeout(poll, TASK_POLL_INTERVAL_MS);
+          } else {
+            pendingTasksRef.current.delete(taskId);
+            setProcessingCount((c) => Math.max(0, c - 1));
           }
         } catch {
           pendingTasksRef.current.delete(taskId);
+          setProcessingCount((c) => Math.max(0, c - 1));
         }
       };
 
       setTimeout(poll, TASK_POLL_INTERVAL_MS);
     },
-    [addExtraction],
+    [addExtraction, setProcessingCount],
   );
 
   // ──────────────────────────────── Frame capture ───────────────────────────
@@ -189,6 +212,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
 
         const task = await processOCRAsync(frame, session.id, lat, lon);
         pendingTasksRef.current.add(task.task_id);
+        setProcessingCount((c) => c + 1);
         void pollTask(task.task_id, session.id);
       } catch (err) {
         console.warn('[CameraScreen] Frame processing error:', err);
@@ -251,7 +275,7 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
         ref={cameraRef}
         style={styles.camera}
         device={device}
-        isActive={isFocused}
+        isActive={isFocused && appActive}
         photo={true}
         onInitialized={() => setCameraReady(true)}
       />
@@ -260,7 +284,16 @@ export default function CameraScreen({ navigation }: Props): React.JSX.Element {
       <View style={styles.overlay}>
         {/* Status bar */}
         <View style={styles.statusBar}>
-          <Text style={styles.statusText}>{statusMessage}</Text>
+          <View style={styles.statusLeft}>
+            {processingCount > 0 ? (
+              <ActivityIndicator size="small" color="#ff9800" style={styles.spinner} />
+            ) : (
+              <View style={styles.idleDot} />
+            )}
+            <Text style={processingCount > 0 ? styles.processingText : styles.statusText}>
+              {processingCount > 0 ? `変換中… (${processingCount})` : statusMessage}
+            </Text>
+          </View>
           <TouchableOpacity
             style={styles.gpsButton}
             onPress={handleGpsToggle}
@@ -342,7 +375,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
+  statusLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   statusText: { color: '#aaa', fontSize: 12 },
+  processingText: { color: '#ff9800', fontSize: 12, fontWeight: '600' },
+  spinner: { marginRight: 6 },
+  idleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4caf50',
+    marginRight: 6,
+  },
   gpsButton: {
     paddingHorizontal: 10,
     paddingVertical: 4,

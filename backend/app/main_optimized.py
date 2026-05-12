@@ -244,6 +244,25 @@ def process_ocr_async(
     )
 
 
+@app.get("/tasks/queue-stats")
+def queue_stats() -> dict:
+    """Return active/queued Celery task counts for the admin UI."""
+    try:
+        inspect = celery_app.control.inspect(timeout=1.0)
+        active = inspect.active() or {}
+        reserved = inspect.reserved() or {}
+        active_count = sum(len(v) for v in active.values())
+        queued_count = sum(len(v) for v in reserved.values())
+        return {
+            "active": active_count,
+            "queued": queued_count,
+            "total": active_count + queued_count,
+            "workers": len(active),
+        }
+    except Exception:
+        return {"active": 0, "queued": 0, "total": 0, "workers": 0, "error": "unreachable"}
+
+
 @app.get("/tasks/{task_id}", response_model=TaskStatusResponse)
 def get_task_status(task_id: str) -> TaskStatusResponse:
     result = AsyncResult(task_id, app=celery_app)
@@ -415,13 +434,22 @@ def admin_ui() -> str:
   .session-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
   .card.selected { outline: 2px solid #0d6efd; }
   pre { white-space: pre-wrap; word-break: break-all; }
+  #queue-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: .85rem; }
+  .queue-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .queue-dot.idle { background: #198754; }
+  .queue-dot.busy { background: #fd7e14; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(1.3); } }
 </style>
 </head>
 <body>
 <div class="container py-4">
   <div class="d-flex align-items-center mb-3">
     <h1 class="h3 mb-0 me-3">SignReader 管理画面</h1>
-    <span id="session-count" class="badge bg-secondary">読込中...</span>
+    <span id="session-count" class="badge bg-secondary me-3">読込中...</span>
+    <div id="queue-indicator">
+      <div class="queue-dot idle" id="queue-dot"></div>
+      <span id="queue-label" class="text-muted">待機中</span>
+    </div>
     <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSessions()">更新</button>
   </div>
 
@@ -620,6 +648,28 @@ function escHtml(s) {
 
 document.getElementById('hide-duplicates').addEventListener('change', renderExtractions);
 
+async function updateQueueStats() {
+  try {
+    const res = await fetch(BASE + '/tasks/queue-stats');
+    const data = await res.json();
+    const dot = document.getElementById('queue-dot');
+    const label = document.getElementById('queue-label');
+    if (data.total > 0) {
+      dot.className = 'queue-dot busy';
+      label.textContent = `変換中 ${data.active} 件 / キュー ${data.queued} 件`;
+      label.style.color = '#fd7e14';
+      label.style.fontWeight = '600';
+    } else {
+      dot.className = 'queue-dot idle';
+      label.textContent = data.error ? '(ワーカー接続不可)' : '待機中';
+      label.style.color = '';
+      label.style.fontWeight = '';
+    }
+  } catch {}
+}
+
+updateQueueStats();
+setInterval(updateQueueStats, 2000);
 loadSessions();
 </script>
 </body>
