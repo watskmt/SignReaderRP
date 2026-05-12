@@ -113,14 +113,16 @@ export default function SessionListScreen({ navigation }: Props): React.JSX.Elem
 
   const renderItem = ({ item }: { item: SessionWithCount }) => {
     const date = new Date(item.started_at);
-    const dateStr = date.toLocaleDateString(undefined, {
+    const dateStr = date.toLocaleDateString('ja-JP', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      timeZone: 'Asia/Tokyo',
     });
-    const timeStr = date.toLocaleTimeString(undefined, {
+    const timeStr = date.toLocaleTimeString('ja-JP', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Tokyo',
     });
 
     return (

@@ -546,7 +546,7 @@ async function loadSessions() {
   const list = document.getElementById('sessions-list');
   list.innerHTML = sessions.map(s => {
     const stats = statsMap[s.id] || {};
-    const date = new Date(s.created_at).toLocaleString('ja-JP');
+    const date = new Date(s.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
     const statusColor = s.status === 'active' ? 'success' : 'secondary';
     return `
       <div class="col-md-6 col-lg-4">
@@ -615,7 +615,7 @@ function renderExtractions() {
     .map(e => {
       const pct = Math.round(e.confidence * 100);
       const gps = e.latitude ? `${e.latitude.toFixed(5)}, ${e.longitude.toFixed(5)}` : '-';
-      const date = new Date(e.timestamp).toLocaleString('ja-JP');
+      const date = new Date(e.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
       return `<tr class="extraction-row ${e.is_duplicate ? 'duplicate' : ''}">
         <td>${escHtml(e.content)}</td>
         <td>

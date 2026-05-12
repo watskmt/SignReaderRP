@@ -49,11 +49,12 @@ function groupByHour(extractions: ExtractionData[]): ExtractionSection[] {
 
   for (const ext of extractions) {
     const date = new Date(ext.timestamp);
-    const key = date.toLocaleString(undefined, {
+    const key = date.toLocaleString('ja-JP', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Tokyo',
     });
     if (!groups[key]) {
       groups[key] = [];
