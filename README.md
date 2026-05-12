@@ -162,20 +162,16 @@ npx react-native run-android
 
 > **本番 API への接続:** `src/config/api.ts` の `API_BASE_URL` は `https://api.signreader.amtech-service.com` に設定済みです。
 
-### テストの実行
+### 自動デプロイ (GitHub Actions)
 
-```bash
-# バックエンド
-cd backend && source venv/bin/activate
-pytest -v
+`main` ブランチへのプッシュにより自動的にデプロイが実行されます。
+以下の GitHub Secrets を設定する必要があります：
+- `SERVER_HOST`: サーバーのIPアドレス (`157.120.37.201`)
+- `SERVER_USER`: SSH ユーザー (`rocky`)
+- `DEPLOY_SSH_KEY`: SSH 秘密鍵の内容
+- `PROD_ENV_FILE`: `backend/.env.prod` の内容
 
-# モバイル
-cd mobile && npm test
-```
-
-## デプロイ
-
-本番環境: Rocky Linux（kernel 6.12、EL10系）、`157.120.37.201`
+### 手動デプロイ
 
 ```bash
 # 初回セットアップ（Dockerインストール・スワップ・daemon.json設定）

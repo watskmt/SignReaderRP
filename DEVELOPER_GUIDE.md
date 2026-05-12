@@ -119,7 +119,7 @@
 
 ## 5. デプロイフロー
 
-詳細は `deploy.sh` および `README.md` を参照してください。
+詳細は `deploy.sh`、`.github/workflows/deploy.yml` および `README.md` を参照してください。
 基本手順:
-1. `git push`
-2. `./deploy.sh deploy` (サーバー側で実行)
+1. `main` ブランチへ `git push` (GitHub Actions が自動デプロイを開始)
+2. 手動デプロイが必要な場合は、適切な環境変数を設定して `./deploy.sh deploy` を実行
