@@ -14,7 +14,7 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/webarena
+          printf "%s\n" "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/webarena
           chmod 600 ~/.ssh/webarena
           ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 

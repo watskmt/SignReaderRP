@@ -29,7 +29,7 @@ if [[ -n "${DEPLOY_SSH_KEY:-}" ]]; then
         cp "$DEPLOY_SSH_KEY" "$SSH_KEY_FILE"
         chmod 600 "$SSH_KEY_FILE"
     else
-        echo "$DEPLOY_SSH_KEY" > "$SSH_KEY_FILE"
+        printf "%s\n" "$DEPLOY_SSH_KEY" > "$SSH_KEY_FILE"
     fi
     trap 'rm -f "$SSH_KEY_FILE"' EXIT
 fi
