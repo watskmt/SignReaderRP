@@ -29,8 +29,10 @@ COMPOSE_FILE="backend/docker-compose.prod.yml"
 # DEPLOY_SSH_KEY は秘密鍵ファイルへのパス
 SSH_KEY_FILE="${DEPLOY_SSH_KEY:-}"
 if [[ -n "$SSH_KEY_FILE" ]]; then
+    # ~ を展開
+    SSH_KEY_FILE="${SSH_KEY_FILE/#\~/$HOME}"
     if [[ ! -f "$SSH_KEY_FILE" ]]; then
-        error "SSH 鍵ファイルが見つかりません: $SSH_KEY_FILE"
+        error "SSH 鍵ファイルが見つかりません: $SSH_KEY_FILE (DEPLOY_SSH_KEY=$DEPLOY_SSH_KEY)"
     fi
     chmod 600 "$SSH_KEY_FILE"
 fi
