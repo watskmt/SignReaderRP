@@ -21,11 +21,24 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "Key info: lines=$(wc -l < ~/.ssh/id_rsa) bytes=$(wc -c < ~/.ssh/id_rsa)"
-          echo "Header: $(head -1 ~/.ssh/id_rsa)"
+          python3 - << 'PYEOF'
+          import sys
+          data = open('/home/runner/.ssh/id_rsa', 'rb').read()
+          print(f"bytes={len(data)} lines={data.count(b'\\n')} cr={data.count(b'\\r')}")
+          print(f"first_8_hex={data[:8].hex()}")
+          print(f"last_4_hex={data[-4:].hex()}")
+          print(f"has_bom={data[:3].hex() == 'efbbbf'}")
+          # first line without masking sensitive content
+          first_line = data.split(b'\\n')[0]
+          print(f"first_line_len={len(first_line)}")
+          if b'BEGIN' in first_line:
+              print(f"first_line={first_line.decode(errors='replace')}")
+          else:
+              print("first_line=DOES NOT CONTAIN 'BEGIN' - PEM header missing!")
+          PYEOF
           openssl rsa -noout -in ~/.ssh/id_rsa 2>&1 \
             || openssl pkey -noout -in ~/.ssh/id_rsa 2>&1 \
-            || { echo "openssl validation failed (see above)"; exit 1; }
+            || { echo "Key invalid. Re-generate the key: ssh-keygen -t ed25519 -C deploy -f /tmp/deploy_key -N \"\""; exit 1; }
           echo "SSH key valid"
           ssh-keyscan -p "$SERVER_PORT" "$SERVER_HOST" >> ~/.ssh/known_hosts
 
