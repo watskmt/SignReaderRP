@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # OCR
     USE_GOOGLE_VISION: bool = False
     GOOGLE_VISION_THRESHOLD: float = 0.85
-    OCR_MIN_CONFIDENCE: float = 0.6
+    OCR_MIN_CONFIDENCE: float = 0.9
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
