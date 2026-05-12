@@ -12,9 +12,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf "%s\n" "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/webarena
+          echo "$SSH_KEY" > ~/.ssh/webarena
           chmod 600 ~/.ssh/webarena
           ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 

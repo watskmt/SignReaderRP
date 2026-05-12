@@ -42,8 +42,8 @@ if [[ -n "$SSH_KEY_FILE" ]]; then
     SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no"
 fi
 
-ssh_cmd() { ssh $SSH_OPTS -p "$SERVER_PORT" "${SERVER_USER}@${SERVER_HOST}" "$@"; }
-scp_file() { scp $SSH_OPTS -P "$SERVER_PORT" "$1" "${SERVER_USER}@${SERVER_HOST}:$2"; }
+ssh_cmd() { ssh $SSH_OPTS -p "$SERVER_PORT" -o ConnectTimeout=15 "${SERVER_USER}@${SERVER_HOST}" "$@"; }
+scp_file() { scp $SSH_OPTS -P "$SERVER_PORT" -o ConnectTimeout=15 "$1" "${SERVER_USER}@${SERVER_HOST}:$2"; }
 
 check_config() {
     if [[ -z "$SERVER_HOST" ]]; then error "SERVER_HOST が未設定です。例: export SERVER_HOST=192.168.1.100"; fi
