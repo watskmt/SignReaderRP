@@ -19,6 +19,15 @@ jobs:
           # 秘密鍵を書き出し、改行コードを LF に統一し、末尾に確実に改行を追加
           printf "%s" "$SSH_KEY" | tr -d '\r' > ~/.ssh/webarena
           echo "" >> ~/.ssh/webarena
+          
+          # デバッグ情報 (形式の確認のみ、鍵の内容は見せない)
+          echo "Debug: Key file stats"
+          ls -l ~/.ssh/webarena
+          echo "Debug: First 20 characters of the key file"
+          head -c 20 ~/.ssh/webarena | od -A n -t x1
+          echo "Debug: File command output"
+          file ~/.ssh/webarena
+
           chmod 600 ~/.ssh/webarena
           ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
