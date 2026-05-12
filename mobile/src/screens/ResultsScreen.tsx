@@ -110,7 +110,7 @@ export default function ResultsScreen({ route }: Props): React.JSX.Element {
   // ──────────────────────────────── Filtering ───────────────────────────────
 
   const filteredExtractions = useMemo(() => {
-    let result = extractions;
+    let result = extractions.filter((e) => e.confidence > 0.80);
 
     if (!showDuplicates) {
       result = result.filter((e) => !e.is_duplicate);

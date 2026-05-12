@@ -594,18 +594,23 @@ async function openSession(id, title) {
   allExtractions = await extRes.json();
   const stats = await statsRes.json();
 
+  const lowConf = allExtractions.filter(e => e.confidence <= 0.80).length;
   document.getElementById('modal-stats').innerHTML = `
     <div class="col-auto"><span class="badge bg-primary">${stats.total_extractions} 件</span></div>
     <div class="col-auto"><span class="badge bg-success">${stats.unique_texts} ユニーク</span></div>
     <div class="col-auto"><span class="badge bg-secondary">${stats.duplicate_extractions} 重複</span></div>
-    <div class="col-auto"><span class="badge bg-info text-dark">平均信頼度 ${(stats.avg_confidence * 100).toFixed(1)}%</span></div>`;
+    <div class="col-auto"><span class="badge bg-info text-dark">平均信頼度 ${(stats.avg_confidence * 100).toFixed(1)}%</span></div>
+    ${lowConf > 0 ? `<div class="col-auto"><span class="badge bg-danger">${lowConf} 件 低信頼度(≤80%)</span></div>` : ''}`;
 
   renderExtractions();
 }
 
+const MIN_CONFIDENCE = 0.81;
+
 function renderExtractions() {
   const hideDup = document.getElementById('hide-duplicates').checked;
   const rows = allExtractions
+    .filter(e => e.confidence > 0.80)
     .filter(e => !hideDup || !e.is_duplicate)
     .map(e => {
       const pct = Math.round(e.confidence * 100);
