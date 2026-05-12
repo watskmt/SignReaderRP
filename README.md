@@ -168,7 +168,7 @@ npx react-native run-android
 以下の GitHub Secrets を設定する必要があります：
 - `SERVER_HOST`: サーバーのIPアドレス (`157.120.37.201`)
 - `SERVER_USER`: SSH ユーザー (`rocky`)
-- `DEPLOY_SSH_KEY`: SSH 秘密鍵の内容
+- `DEPLOY_SSH_KEY`: SSH 秘密鍵ファイルへのパス (`~/.ssh/webarena` 等)
 - `PROD_ENV_FILE`: `backend/.env.prod` の内容
 
 ### 手動デプロイ

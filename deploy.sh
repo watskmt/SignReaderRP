@@ -18,20 +18,14 @@ DEPLOY_DIR="${DEPLOY_DIR:-/opt/signreader}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 COMPOSE_FILE="backend/docker-compose.prod.yml"
 
-# SSH キー設定（DEPLOY_SSH_KEY 環境変数から一時ファイルを作成）
-# DEPLOY_SSH_KEY は秘密鍵の内容、またはファイルパスのどちらでも可
-SSH_KEY_FILE=""
-if [[ -n "${DEPLOY_SSH_KEY:-}" ]]; then
-    SSH_KEY_FILE=$(mktemp)
-    chmod 600 "$SSH_KEY_FILE"
-    # ファイルパスの場合は内容を読み込む、そうでなければ直接書き込む
-    if [[ -f "$DEPLOY_SSH_KEY" ]]; then
-        cp "$DEPLOY_SSH_KEY" "$SSH_KEY_FILE"
-        chmod 600 "$SSH_KEY_FILE"
-    else
-        printf "%s\n" "$DEPLOY_SSH_KEY" > "$SSH_KEY_FILE"
+# SSH キー設定
+# DEPLOY_SSH_KEY は秘密鍵ファイルへのパス
+SSH_KEY_FILE="${DEPLOY_SSH_KEY:-}"
+if [[ -n "$SSH_KEY_FILE" ]]; then
+    if [[ ! -f "$SSH_KEY_FILE" ]]; then
+        error "SSH 鍵ファイルが見つかりません: $SSH_KEY_FILE"
     fi
-    trap 'rm -f "$SSH_KEY_FILE"' EXIT
+    chmod 600 "$SSH_KEY_FILE"
 fi
 
 # ─────────────────────────────── ヘルパー ─────────────────────────────────────
@@ -332,7 +326,7 @@ case "$COMMAND" in
         echo "  SERVER_HOST=192.168.1.100  デプロイ先サーバー（必須）"
         echo "  SERVER_USER=ubuntu         SSH ユーザー（デフォルト: ubuntu）"
         echo "  SERVER_PORT=22             SSH ポート（デフォルト: 22）"
-        echo "  DEPLOY_SSH_KEY='...'       SSH 秘密鍵の内容（ファイルパスではない）"
+        echo "  DEPLOY_SSH_KEY='...'       SSH 秘密鍵ファイルへのパス"
         echo "  DOMAIN=api.example.com     ドメイン名（ssl コマンドで必須）"
         exit 1
         ;;
